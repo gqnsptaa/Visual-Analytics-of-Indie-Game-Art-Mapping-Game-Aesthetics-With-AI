@@ -82,4 +82,87 @@ python src/clip_indie_pipeline.py \
 
 Main output:
 
-- `w
+- `web/data/analysis_results.json`
+- `web/data/sample_points.csv`
+- `web/data/centroid_similarity.csv`
+- `web/data/prompt_similarity_by_group.csv`
+- `web/data/prompt_similarity_by_game.csv`
+- `web/data/cluster_crosstab.csv`
+
+How CLIP uses prompts:
+- Images are encoded into CLIP embeddings.
+- Prompts are encoded into text embeddings.
+- Similarity is computed as cosine similarity (`image_embedding dot prompt_embedding`).
+- Scores are averaged by game and exported to `prompt_similarity_by_game.csv`.
+
+## 4. Launch UI (with Run Analysis button)
+
+Start the integrated local app server:
+
+```bash
+python src/local_app_server.py --host 127.0.0.1 --port 8000
+```
+
+Then open `http://127.0.0.1:8000`.
+
+If `training_outputs/style_adapter/best_style_adapter.pt` exists, the Run Analysis button
+automatically passes it to the pipeline.
+
+From the page you can now click:
+- `Run Analysis` to execute the full Python pipeline.
+- `Load Default Data` to reload `web/data/analysis_results.json`.
+- Adjust `UMAP n_neighbors`, `UMAP min_dist`, and `t-SNE perplexity` sliders, then click `Run Analysis` again to compare structures.
+- Explore the new `Neighborhood Radius Explorer` and `2D UMAP/t-SNE image maps` sections.
+- Use `Group Filter` and group-level heatmaps to compare `aaa` vs `indie`.
+
+## 5. Alternative: Static Frontend only
+
+```bash
+cd web
+python3 -m http.server 8000
+```
+
+Then open `http://localhost:8000`.
+
+## 6. Train a Style Adapter (OpenCLIP)
+
+Create a labeled CSV with columns `path,label`:
+
+```text
+path,label
+indie_games_dataset/Hades/shot1.jpg,cinematic low-key lighting
+indie_games_dataset/Fez/img3.png,flat geometric vector design
+```
+
+Train an adapter head on frozen OpenCLIP embeddings:
+
+```bash
+python src/train_openclip_style_adapter.py \
+  --train-csv path/to/style_labels.csv \
+  --image-root /Users/gqnsptaa/Desktop/Codex_Project \
+  --output-dir training_outputs/style_adapter \
+  --model-name ViT-B/32 \
+  --pretrained openai \
+  --device auto \
+  --epochs 30 \
+  --batch-size 64 \
+  --cache-embeddings
+```
+
+Outputs:
+- `training_outputs/style_adapter/best_style_adapter.pt`
+- `training_outputs/style_adapter/training_summary.json`
+- Optional embedding caches when `--cache-embeddings` is used.
+
+After training:
+- Run analysis with `--style-adapter-checkpoint ...` (or just click `Run Analysis` in UI if the default checkpoint path exists).
+- The `Prompt Similarity by Game` heatmap will switch to adapter-based style scores.
+
+## Notes on Robustness and Performance
+
+- Corrupted/unreadable images are skipped and listed in `skipped_images` output.
+- Small datasets automatically use PCA fallback where t-SNE/UMAP are unstable.
+- t-SNE perplexity and UMAP neighbors are auto-clamped to valid ranges.
+- Batched CLIP inference is used for speed, with CUDA mixed precision where available.
+- Thumbnails are exported to `web/data/thumbs/` for image-marker visualizations.
+- Frontend uses `Plotly.react` and filtered rendering to keep interactions responsive.
