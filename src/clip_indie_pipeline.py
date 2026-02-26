@@ -680,4 +680,374 @@ def run_style_adapter_inference(
         label = None
         if class_id in id_to_label_raw:
             label = id_to_label_raw[class_id]
-        elif str(class_id) in i
+        elif str(class_id) in id_to_label_raw:
+            label = id_to_label_raw[str(class_id)]
+        if not isinstance(label, str) or not label.strip():
+            raise PipelineError(f"Style adapter checkpoint has invalid class label for id={class_id}.")
+        class_labels.append(label)
+
+    features = torch.from_numpy(embeddings).to(torch.float32)
+    with torch.inference_mode():
+        logits = head(features)
+        probs = torch.softmax(logits, dim=1).cpu().numpy().astype(np.float32)
+
+    pred_ids = np.argmax(probs, axis=1)
+    pred_conf = probs[np.arange(probs.shape[0]), pred_ids]
+    sample_predictions = [
+        {
+            "style_pred_label": class_labels[int(pred_ids[i])],
+            "style_pred_confidence": float(pred_conf[i]),
+        }
+        for i in range(probs.shape[0])
+    ]
+
+    games, game_scores = average_scores_by_label(probs, labels)
+
+    meta = {
+        "checkpoint": str(checkpoint_path),
+        "num_classes": num_classes,
+        "model_name": checkpoint.get("model_name"),
+        "pretrained": checkpoint.get("pretrained"),
+        "best_metrics": checkpoint.get("best_metrics"),
+    }
+    return games, game_scores, class_labels, probs, sample_predictions, meta
+
+
+def export_sample_thumbnails(
+    records: list[ImageRecord],
+    output_dir: Path,
+    thumbnail_size: int,
+) -> dict[int, str]:
+    """Export thumbnails and return mapping image_id -> relative web path."""
+    if thumbnail_size < 16 or thumbnail_size > 512:
+        raise PipelineError("thumbnail-size must be between 16 and 512.")
+
+    thumbs_dir = output_dir / "thumbs"
+    thumbs_dir.mkdir(parents=True, exist_ok=True)
+    mapping: dict[int, str] = {}
+
+    # Keep center composition consistent by padding each image into a square canvas.
+    for rec in records:
+        out_path = thumbs_dir / f"{rec.image_id}.jpg"
+        try:
+            with Image.open(rec.path) as img:
+                image = img.convert("RGB")
+                image.thumbnail((thumbnail_size, thumbnail_size), Image.Resampling.LANCZOS)
+
+                canvas = Image.new("RGB", (thumbnail_size, thumbnail_size), color=(243, 244, 246))
+                offset = (
+                    (thumbnail_size - image.width) // 2,
+                    (thumbnail_size - image.height) // 2,
+                )
+                canvas.paste(image, offset)
+                canvas.save(out_path, format="JPEG", quality=85, optimize=True)
+            mapping[rec.image_id] = f"data/thumbs/{rec.image_id}.jpg"
+        except Exception:
+            # Thumbnail export is optional; skip failures without aborting analysis.
+            continue
+
+    return mapping
+
+
+def write_csv(path: Path, rows: Iterable[dict], fieldnames: list[str]) -> None:
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
+def atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None:
+    """Write text atomically to avoid readers seeing partial JSON."""
+    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+    tmp_path.write_text(content, encoding=encoding)
+    tmp_path.replace(path)
+
+
+def run() -> int:
+    args = parse_args()
+    set_seed(args.seed)
+
+    output_dir: Path = args.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    valid_ext = tuple(
+        ext.strip().lower() if ext.strip().startswith(".") else f".{ext.strip().lower()}"
+        for ext in args.extensions.split(",")
+        if ext.strip()
+    )
+    if not valid_ext:
+        raise PipelineError("No valid image extensions provided.")
+
+    device = choose_device(args.device)
+    records = collect_image_records(DATASET_ROOT, valid_ext, args.max_images)
+    if not records:
+        raise PipelineError(
+            "No images found in dataset folder. Ensure structure is: "
+            f"{DATASET_ROOT}/GameName/*.jpg"
+        )
+
+    adapter = load_clip_adapter(args.clip_backend, args.model_name, device)
+    prompts = load_style_prompts(args.style_prompts_file)
+    game_group_map = load_game_groups(args.game_groups_file)
+
+    print(f"Dataset source: local-only ({DATASET_ROOT})")
+    print(f"Found {len(records)} image candidates across {len(set(r.label for r in records))} games.")
+    print(f"Running CLIP on device={device.type} backend={adapter.backend_name} model={args.model_name}")
+
+    embeddings, valid_records, skipped_images = encode_images(adapter, records, args.batch_size)
+    labels = [r.label for r in valid_records]
+    sample_groups = [game_group_map.get(label, "unassigned") for label in labels]
+    group_counts: dict[str, int] = defaultdict(int)
+    for group in sample_groups:
+        group_counts[group] += 1
+
+    if len(valid_records) < 2:
+        raise PipelineError("Need at least 2 valid images after filtering/skips.")
+
+    tsne_points, tsne_meta = adaptive_tsne_3d(embeddings, args.tsne_perplexity, args.seed)
+    umap_points, umap_meta = adaptive_umap_3d(embeddings, args.umap_n_neighbors, args.umap_min_dist, args.seed)
+
+    unique_games, centroid_matrix = normalized_centroids(embeddings, labels)
+    similarity_matrix = cosine_similarity_matrix(centroid_matrix)
+    unique_groups, group_centroids = normalized_centroids(embeddings, sample_groups)
+    group_similarity_matrix = cosine_similarity_matrix(group_centroids)
+
+    cluster_ids, kmeans_meta = safe_kmeans(embeddings, labels, args.kmeans_k, args.seed)
+    cluster_crosstab = crosstab_counts(labels, cluster_ids)
+
+    with torch.inference_mode():
+        text_features = adapter.encode_text(prompts).detach().cpu().numpy().astype(np.float32)
+
+    clip_prompt_games, clip_game_prompt_scores, clip_sample_prompt_scores = prompt_similarity_by_game(
+        embeddings, labels, text_features
+    )
+    clip_prompt_groups, clip_group_prompt_scores = average_scores_by_label(clip_sample_prompt_scores, sample_groups)
+    prompt_games = clip_prompt_games
+    prompt_labels = list(prompts)
+    game_prompt_scores = clip_game_prompt_scores
+    prompt_groups = clip_prompt_groups
+    group_prompt_scores = clip_group_prompt_scores
+    prompt_source = "clip_text_prompts"
+    style_adapter_meta: dict = {"enabled": False}
+    style_sample_predictions = [
+        {"style_pred_label": "", "style_pred_confidence": 0.0}
+        for _ in range(len(valid_records))
+    ]
+
+    if args.style_adapter_checkpoint is not None:
+        (
+            adapter_games,
+            adapter_scores,
+            adapter_labels,
+            adapter_sample_scores,
+            style_sample_predictions,
+            style_meta,
+        ) = run_style_adapter_inference(embeddings, labels, args.style_adapter_checkpoint)
+        prompt_games = adapter_games
+        prompt_labels = adapter_labels
+        game_prompt_scores = adapter_scores
+        prompt_groups, group_prompt_scores = average_scores_by_label(adapter_sample_scores, sample_groups)
+        prompt_source = "style_adapter"
+        style_adapter_meta = {
+            "enabled": True,
+            **style_meta,
+        }
+        print(f"Using style adapter checkpoint: {args.style_adapter_checkpoint}")
+    thumbnail_map: dict[int, str] = {}
+    if args.export_thumbnails:
+        thumbnail_map = export_sample_thumbnails(
+            records=valid_records,
+            output_dir=output_dir,
+            thumbnail_size=args.thumbnail_size,
+        )
+
+    samples = []
+    for i, rec in enumerate(valid_records):
+        samples.append(
+            {
+                "image_id": rec.image_id,
+                "label": rec.label,
+                "group": sample_groups[i],
+                "path": str(rec.path),
+                "thumbnail": thumbnail_map.get(rec.image_id),
+                "cluster_id": int(cluster_ids[i]),
+                "style_pred_label": style_sample_predictions[i]["style_pred_label"],
+                "style_pred_confidence": style_sample_predictions[i]["style_pred_confidence"],
+                "tsne": [float(x) for x in tsne_points[i].tolist()],
+                "umap": [float(x) for x in umap_points[i].tolist()],
+            }
+        )
+
+    results = {
+        "meta": {
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
+            "root_dir": str(DATASET_ROOT),
+            "device": device.type,
+            "clip_backend": adapter.backend_name,
+            "model_name": args.model_name,
+            "extensions": list(valid_ext),
+            "total_candidates": len(records),
+            "valid_images": len(valid_records),
+            "skipped_images": len(skipped_images),
+            "num_games": len(set(labels)),
+            "num_groups": len(set(sample_groups)),
+            "group_counts": {
+                group: int(count)
+                for group, count in sorted(group_counts.items(), key=lambda item: item[0])
+            },
+            "data_source": {
+                "source": "local_only",
+                "fixed_dataset_root": str(DATASET_ROOT),
+                "game_groups_file": str(args.game_groups_file),
+            },
+        },
+        "runtime_parameters": {
+            "batch_size": args.batch_size,
+            "seed": args.seed,
+            "tsne": tsne_meta,
+            "umap": umap_meta,
+            "kmeans": kmeans_meta,
+            "style_adapter": style_adapter_meta,
+            "thumbnails": {
+                "enabled": bool(args.export_thumbnails),
+                "size": int(args.thumbnail_size),
+                "exported_count": len(thumbnail_map),
+            },
+        },
+        "samples": samples,
+        "centroid_similarity": {
+            "labels": unique_games,
+            "matrix": [[float(v) for v in row] for row in similarity_matrix.tolist()],
+        },
+        "group_centroid_similarity": {
+            "labels": unique_groups,
+            "matrix": [[float(v) for v in row] for row in group_similarity_matrix.tolist()],
+        },
+        "clusters": {
+            "k": int(kmeans_meta["k"]),
+            "crosstab": cluster_crosstab,
+        },
+        "prompt_similarity": {
+            "games": prompt_games,
+            "prompts": prompt_labels,
+            "matrix": [[float(v) for v in row] for row in game_prompt_scores.tolist()],
+            "source": prompt_source,
+        },
+        "clip_prompt_similarity": {
+            "games": clip_prompt_games,
+            "prompts": prompts,
+            "matrix": [[float(v) for v in row] for row in clip_game_prompt_scores.tolist()],
+            "source": "clip_text_prompts",
+        },
+        "prompt_similarity_by_group": {
+            "groups": prompt_groups,
+            "prompts": prompt_labels,
+            "matrix": [[float(v) for v in row] for row in group_prompt_scores.tolist()],
+            "source": prompt_source,
+        },
+        "clip_prompt_similarity_by_group": {
+            "groups": clip_prompt_groups,
+            "prompts": prompts,
+            "matrix": [[float(v) for v in row] for row in clip_group_prompt_scores.tolist()],
+            "source": "clip_text_prompts",
+        },
+        "skipped_images": skipped_images,
+    }
+
+    json_path = output_dir / "analysis_results.json"
+    atomic_write_text(json_path, json.dumps(results, indent=2), encoding="utf-8")
+
+    sample_rows = []
+    for sample in samples:
+        sample_rows.append(
+            {
+                "image_id": sample["image_id"],
+                "game": sample["label"],
+                "group": sample.get("group", "unassigned"),
+                "path": sample["path"],
+                "thumbnail": sample.get("thumbnail") or "",
+                "cluster_id": sample["cluster_id"],
+                "style_pred_label": sample.get("style_pred_label", ""),
+                "style_pred_confidence": sample.get("style_pred_confidence", 0.0),
+                "tsne_x": sample["tsne"][0],
+                "tsne_y": sample["tsne"][1],
+                "tsne_z": sample["tsne"][2],
+                "umap_x": sample["umap"][0],
+                "umap_y": sample["umap"][1],
+                "umap_z": sample["umap"][2],
+            }
+        )
+
+    write_csv(
+        output_dir / "sample_points.csv",
+        sample_rows,
+        [
+            "image_id",
+            "game",
+            "group",
+            "path",
+            "thumbnail",
+            "cluster_id",
+            "style_pred_label",
+            "style_pred_confidence",
+            "tsne_x",
+            "tsne_y",
+            "tsne_z",
+            "umap_x",
+            "umap_y",
+            "umap_z",
+        ],
+    )
+
+    cent_rows = []
+    for i, g1 in enumerate(unique_games):
+        for j, g2 in enumerate(unique_games):
+            cent_rows.append({"game_a": g1, "game_b": g2, "cosine_similarity": float(similarity_matrix[i, j])})
+    write_csv(output_dir / "centroid_similarity.csv", cent_rows, ["game_a", "game_b", "cosine_similarity"])
+
+    prompt_rows = []
+    for gi, game in enumerate(prompt_games):
+        row = {"game": game}
+        for pi, prompt in enumerate(prompt_labels):
+            row[prompt] = float(game_prompt_scores[gi, pi])
+        prompt_rows.append(row)
+    write_csv(output_dir / "prompt_similarity_by_game.csv", prompt_rows, ["game", *prompt_labels])
+
+    prompt_group_rows = []
+    for gi, group in enumerate(prompt_groups):
+        row = {"group": group}
+        for pi, prompt in enumerate(prompt_labels):
+            row[prompt] = float(group_prompt_scores[gi, pi])
+        prompt_group_rows.append(row)
+    write_csv(output_dir / "prompt_similarity_by_group.csv", prompt_group_rows, ["group", *prompt_labels])
+
+    crosstab_rows = []
+    for game, clusters in cluster_crosstab.items():
+        for cluster_str, count in sorted(clusters.items(), key=lambda x: int(x[0])):
+            crosstab_rows.append({"game": game, "cluster_id": cluster_str, "count": count})
+    write_csv(output_dir / "cluster_crosstab.csv", crosstab_rows, ["game", "cluster_id", "count"])
+
+    if args.save_embeddings:
+        np.save(output_dir / "clip_embeddings.npy", embeddings)
+
+    print(f"Saved JSON: {json_path}")
+    print(f"Saved CSV files in: {output_dir}")
+    if args.export_thumbnails:
+        print(f"Exported {len(thumbnail_map)} thumbnails to: {output_dir / 'thumbs'}")
+    if style_adapter_meta.get("enabled"):
+        print(f"Style adapter source for prompt heatmap: {style_adapter_meta.get('checkpoint')}")
+    print(f"Processed {len(valid_records)} images (skipped {len(skipped_images)} unreadable files).")
+    return 0
+
+
+def main() -> None:
+    try:
+        raise SystemExit(run())
+    except PipelineError as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        raise SystemExit(2)
+
+
+if __name__ == "__main__":
+    main()
