@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CLIP Indie Aesthetics Explorer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css?v=20260226a" />
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
+    <script src="app.js?v=20260226a" defer></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero card">
+        <h1>CLIP Indie Aesthetics Explorer</h1>
+        <p>
+          Interactive 3D t-SNE and 3D UMAP visualizations built from CLIP embeddings,
+          with centroid similarity, prompt scoring, and cluster diagnostics.
+        </p>
+      </section>
+
+      <section class="controls card">
+        <div class="controls-row">
+          <button id="runAnalysisBtn" class="btn" disabled>Run Analysis</button>
+          <button id="loadDefaultBtn" class="btn">Load Default Data</button>
+          <label class="file-label" for="jsonFileInput">Load JSON File</label>
+          <input id="jsonFileInput" type="file" accept="application/json" />
+          <button id="resetFiltersBtn" class="btn btn-muted">Reset Filters</button>
+        </div>
+
+        <div class="param-panel">
+          <div class="param-item">
+            <label for="umapNeighborsInput">UMAP n_neighbors: <strong id="umapNeighborsValue">10</strong></label>
+            <input id="umapNeighborsInput" type="range" min="2" max="60" step="1" value="10" />
+          </div>
+          <div class="param-item">
+            <label for="umapMinDistInput">UMAP min_dist: <strong id="umapMinDistValue">0.10</strong></label>
+            <input id="umapMinDistInput" type="range" min="0.00" max="0.99" step="0.01" value="0.10" />
+          </div>
+          <div class="param-item">
+            <label for="tsnePerplexityInput">t-SNE perplexity: <strong id="tsnePerplexityValue">10</strong></label>
+            <input id="tsnePerplexityInput" type="range" min="2" max="60" step="1" value="10" />
+          </div>
+          <div class="preset-row">
+            <button id="presetLocalBtn" class="btn btn-muted btn-small" type="button">Local Detail</button>
+            <button id="presetBalancedBtn" class="btn btn-muted btn-small" type="button">Balanced</button>
+            <button id="presetGlobalBtn" class="btn btn-muted btn-small" type="button">Global Structure</button>
+          </div>
+        </div>
+
+        <div class="controls-row">
+          <label for="gameFilter">Games Filter</label>
+          <select id="gameFilter" multiple size="6"></select>
+        </div>
+        <div class="controls-row">
+          <label for="groupFilter">Group Filter</label>
+          <select id="groupFilter" multiple size="3"></select>
+        </div>
+
+        <div id="status" class="status" aria-live="polite">
+          Waiting for data...
+        </div>
+      </section>
+
+      <section class="story-grid">
+        <article class="card">
+          <h2>1. Local vs Global</h2>
+          <p>
+            Lower <code>n_neighbors</code> focuses on local details. Higher values preserve broader structure between
+            game styles.
+          </p>
+        </article>
+        <article class="card">
+          <h2>2. Cluster Tightness</h2>
+          <p>
+            Lower <code>min_dist</code> packs points tightly and highlights dense clusters. Higher values spread
+            clusters apart.
+          </p>
+        </article>
+        <article class="card">
+          <h2>3. t-SNE Balance</h2>
+          <p>
+            Perplexity controls local/global tradeoff in t-SNE. Try low, medium, and high presets to compare behavior.
+          </p>
+        </article>
+      </section>
+
+      <section class="card">
+        <h2>Neighborhood Radius Explorer</h2>
+        <p>
+          Extend a radius from each point using distance to its <code>n</code>th nearest neighbor. This approximates
+          local fuzzy neighborhood behavior.
+        </p>
+        <div class="radius-controls">
+          <label for="radiusExtentInput">extent: <strong id="radiusExtentValue">0%</strong></label>
+          <input id="radiusExtentInput" type="range" min="0" max="100" step="1" value="0" />
+          <label for="radiusNNearestInput">n_nearest: <strong id="radiusNNearestValue">5</strong></label>
+          <input id="radiusNNearestInput" type="range" min="2" max="20" step="1" value="5" />
+          <label class="inline-check">
+            <input id="radiusUseTsneCheck" type="checkbox" />
+            Use t-SNE coordinates (default: UMAP)
+          </label>
+        </div>
+        <canvas id="radiusCanvas" class="radius-canvas"></canvas>
+      </section>
+
+      <section class="stack-1">
+        <article class="card">
+          <h2>3D UMAP Thumbnail Map</h2>
+          <div id="umapImage3d" class="image3d-view"></div>
+          <p class="map-hint">Drag to rotate, scroll to zoom, right-drag to pan.</p>
+          <div id="umapImage3dLegend" class="image3d-legend" aria-label="Thumbnail map legend"></div>
+        </article>
+      </section>
+      <section class="stack-1">
+        <article class="card">
+          <h2>3D t-SNE Thumbnail Map</h2>
+          <div id="tsneImage3d" class="image3d-view"></div>
+          <p class="map-hint">Drag to rotate, scroll to zoom, right-drag to pan.</p>
+          <div id="tsneImage3dLegend" class="image3d-legend" aria-label="Thumbnail map legend"></div>
+        </article>
+      </section>
+
+      <section class="stack-1">
+        <article class="card">
+          <h2>3D t-SNE</h2>
+          <div id="tsnePlot" class="plot"></div>
+        </article>
+      </section>
+      <section class="stack-1">
+        <article class="card">
+          <h2>3D UMAP</h2>
+          <div id="umapPlot" class="plot"></div>
+        </article>
+      </section>
+
+      <section class="stack-1">
+        <article class="card">
+          <h2>Centroid Cosine Similarity</h2>
+          <div id="centroidHeatmap" class="plot plot-short"></div>
+        </article>
+      </section>
+      <section class="stack-1">
+        <article class="card">
+          <h2>Group Centroid Cosine Similarity</h2>
+          <div id="groupCentroidHeatmap" class="plot plot-short"></div>
+        </article>
+      </section>
+      <section class="stack-1">
+        <article class="card">
+          <h2>Prompt Similarity by Game</h2>
+          <div id="promptHeatmap" class="plot plot-short"></div>
+        </article>
+      </section>
+      <section class="stack-1">
+        <article class="card">
+          <h2>Prompt Similarity by Group</h2>
+          <div id="promptGroupHeatmap" class="plot plot-short"></div>
+        </article>
+      </section>
+
+      <section class="card">
+        <h2>Cluster Cross-Tab</h2>
+        <div class="table-wrap">
+          <table id="clusterTable">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Skipped Images</h2>
+        <div class="table-wrap">
+          <table id="skippedTable">
+            <thead>
+              <tr>
+                <th>Image ID</th>
+                <th>Game</th>
+                <th>Path</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
