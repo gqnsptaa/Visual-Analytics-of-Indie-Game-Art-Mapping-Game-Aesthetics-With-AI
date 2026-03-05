@@ -15,6 +15,8 @@ const state = {
     samples: [],
     colorMap: {},
   },
+  latestRadiusProjection: [],
+  thesisData: null,
   analysisParams: {
     umapNNeighbors: 10,
     umapMinDist: 0.1,
@@ -31,6 +33,7 @@ const els = {
   status: document.getElementById("status"),
   runAnalysisBtn: document.getElementById("runAnalysisBtn"),
   loadDefaultBtn: document.getElementById("loadDefaultBtn"),
+  loadThesisBtn: document.getElementById("loadThesisBtn"),
   jsonFileInput: document.getElementById("jsonFileInput"),
   gameFilter: document.getElementById("gameFilter"),
   groupFilter: document.getElementById("groupFilter"),
@@ -45,6 +48,8 @@ const els = {
   presetBalancedBtn: document.getElementById("presetBalancedBtn"),
   presetGlobalBtn: document.getElementById("presetGlobalBtn"),
   radiusCanvas: document.getElementById("radiusCanvas"),
+  radiusHover: document.getElementById("radiusHover"),
+  radiusLegend: document.getElementById("radiusLegend"),
   umapImage3d: document.getElementById("umapImage3d"),
   tsneImage3d: document.getElementById("tsneImage3d"),
   umapImage3dLegend: document.getElementById("umapImage3dLegend"),
@@ -60,6 +65,11 @@ const els = {
   groupCentroidHeatmap: document.getElementById("groupCentroidHeatmap"),
   promptHeatmap: document.getElementById("promptHeatmap"),
   promptGroupHeatmap: document.getElementById("promptGroupHeatmap"),
+  thesisStatus: document.getElementById("thesisStatus"),
+  thesisMetrics: document.getElementById("thesisMetrics"),
+  thesisImportancePlot: document.getElementById("thesisImportancePlot"),
+  thesisStatsPlot: document.getElementById("thesisStatsPlot"),
+  thesisTopFeaturesBody: document.querySelector("#thesisTopFeaturesTable tbody"),
   clusterTableHead: document.querySelector("#clusterTable thead"),
   clusterTableBody: document.querySelector("#clusterTable tbody"),
   skippedTableBody: document.querySelector("#skippedTable tbody"),
@@ -301,6 +311,29 @@ function renderGroupLegend(container, samples) {
   }
 }
 
+function renderGameLegend(container, samples, colorMap) {
+  if (!container) return;
+  container.innerHTML = "";
+  if (!Array.isArray(samples) || samples.length === 0) return;
+
+  const labels = uniqueSorted(samples.map((sample) => sample.label));
+  for (const label of labels) {
+    const item = document.createElement("span");
+    item.className = "legend-item";
+
+    const swatch = document.createElement("span");
+    swatch.className = "legend-swatch";
+    swatch.style.backgroundColor = colorMap[label] || "#1d4ed8";
+
+    const text = document.createElement("span");
+    text.textContent = label;
+
+    item.appendChild(swatch);
+    item.appendChild(text);
+    container.appendChild(item);
+  }
+}
+
 function validateData(data) {
   if (!data || typeof data !== "object") {
     throw new Error("Invalid JSON: expected an object at root level.");
@@ -337,6 +370,345 @@ function parseJsonFromFile(file) {
     reader.onerror = () => reject(new Error("Failed to read selected file."));
     reader.readAsText(file);
   });
+}
+
+function setThesisStatus(message, isError = false) {
+  if (!els.thesisStatus) return;
+  els.thesisStatus.textContent = message;
+  els.thesisStatus.classList.toggle("error", isError);
+}
+
+function splitCsvLine(line) {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      const next = i + 1 < line.length ? line[i + 1] : "";
+      if (inQuotes && next === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (ch === "," && !inQuotes) {
+      result.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  result.push(current);
+  return result;
+}
+
+function parseCsvText(text) {
+  const normalized = String(text || "")
+    .replace(/\uFEFF/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
+  if (!normalized) return [];
+
+  const lines = normalized.split("\n").filter((line) => line.length > 0);
+  if (lines.length < 2) return [];
+
+  const headers = splitCsvLine(lines[0]).map((h) => h.trim());
+  const rows = [];
+  for (let i = 1; i < lines.length; i += 1) {
+    const cols = splitCsvLine(lines[i]);
+    const row = {};
+    for (let c = 0; c < headers.length; c += 1) {
+      row[headers[c]] = cols[c] ?? "";
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+async function fetchOptionalJson(candidates) {
+  let sawResponse = false;
+  let lastError = null;
+  for (const url of candidates) {
+    try {
+      const response = await fetch(url, { cache: "no-store" });
+      if (response.status === 404) continue;
+      sawResponse = true;
+      if (!response.ok) {
+        lastError = new Error(`HTTP ${response.status} while loading ${url}`);
+        continue;
+      }
+      const text = await response.text();
+      return JSON.parse(text);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  if (!sawResponse && !lastError) return null;
+  if (lastError) throw lastError;
+  return null;
+}
+
+async function fetchOptionalCsv(candidates) {
+  let sawResponse = false;
+  let lastError = null;
+  for (const url of candidates) {
+    try {
+      const response = await fetch(url, { cache: "no-store" });
+      if (response.status === 404) continue;
+      sawResponse = true;
+      if (!response.ok) {
+        lastError = new Error(`HTTP ${response.status} while loading ${url}`);
+        continue;
+      }
+      const text = await response.text();
+      return parseCsvText(text);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  if (!sawResponse && !lastError) return null;
+  if (lastError) throw lastError;
+  return null;
+}
+
+function toFiniteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatMetricValue(value, digits = 3) {
+  const n = toFiniteNumber(value);
+  if (n === null) return "n/a";
+  return n.toFixed(digits);
+}
+
+function clearThesisViews() {
+  if (els.thesisMetrics) {
+    els.thesisMetrics.innerHTML = "";
+  }
+  if (els.thesisTopFeaturesBody) {
+    els.thesisTopFeaturesBody.innerHTML = "";
+  }
+  if (els.thesisImportancePlot && typeof window.Plotly !== "undefined") {
+    Plotly.purge(els.thesisImportancePlot);
+  }
+  if (els.thesisStatsPlot && typeof window.Plotly !== "undefined") {
+    Plotly.purge(els.thesisStatsPlot);
+  }
+}
+
+function appendMetricCard(label, value) {
+  if (!els.thesisMetrics) return;
+  const card = document.createElement("div");
+  card.className = "metric-card";
+  const labelEl = document.createElement("span");
+  labelEl.className = "metric-label";
+  labelEl.textContent = label;
+  const valueEl = document.createElement("span");
+  valueEl.className = "metric-value";
+  valueEl.textContent = value;
+  card.appendChild(labelEl);
+  card.appendChild(valueEl);
+  els.thesisMetrics.appendChild(card);
+}
+
+function renderThesisTopTable(statsRows) {
+  if (!els.thesisTopFeaturesBody) return;
+  els.thesisTopFeaturesBody.innerHTML = "";
+  if (!Array.isArray(statsRows) || statsRows.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.textContent = "No thesis stats rows available.";
+    tr.appendChild(td);
+    els.thesisTopFeaturesBody.appendChild(tr);
+    return;
+  }
+
+  const sorted = [...statsRows].sort((a, b) => {
+    const qa = toFiniteNumber(a.q_value_bh) ?? Infinity;
+    const qb = toFiniteNumber(b.q_value_bh) ?? Infinity;
+    return qa - qb;
+  });
+  for (const row of sorted.slice(0, 20)) {
+    const tr = document.createElement("tr");
+    const cells = [
+      String(row.feature ?? ""),
+      formatMetricValue(row.mean_indie, 4),
+      formatMetricValue(row.mean_aaa, 4),
+      formatMetricValue(row.mean_diff_aaa_minus_indie, 4),
+      formatMetricValue(row.q_value_bh, 6),
+    ];
+    for (const value of cells) {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    }
+    els.thesisTopFeaturesBody.appendChild(tr);
+  }
+}
+
+function renderThesisPlots(importanceRows, statsRows) {
+  if (typeof window.Plotly === "undefined") return;
+
+  if (els.thesisImportancePlot) {
+    const rows = Array.isArray(importanceRows) ? importanceRows : [];
+    const top = rows
+      .map((row) => ({
+        feature: String(row.feature ?? ""),
+        value: toFiniteNumber(row.perm_importance_mean),
+      }))
+      .filter((row) => row.feature && row.value !== null)
+      .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+      .slice(0, 15);
+    if (top.length > 0) {
+      const ordered = [...top].reverse();
+      Plotly.react(
+        els.thesisImportancePlot,
+        [
+          {
+            type: "bar",
+            orientation: "h",
+            y: ordered.map((r) => r.feature),
+            x: ordered.map((r) => r.value),
+            marker: { color: "#0f766e" },
+            hovertemplate: "%{y}<br>perm importance=%{x:.4f}<extra></extra>",
+          },
+        ],
+        {
+          title: "Top Thesis Features by Permutation Importance",
+          margin: { l: 230, r: 24, t: 46, b: 40 },
+          paper_bgcolor: "rgba(0,0,0,0)",
+          plot_bgcolor: "rgba(0,0,0,0)",
+          xaxis: { title: "Importance (balanced accuracy drop)" },
+        },
+        { responsive: true, displaylogo: false }
+      );
+    } else {
+      Plotly.purge(els.thesisImportancePlot);
+    }
+  }
+
+  if (els.thesisStatsPlot) {
+    const rows = Array.isArray(statsRows) ? statsRows : [];
+    const top = rows
+      .map((row) => {
+        const q = toFiniteNumber(row.q_value_bh);
+        const diff = toFiniteNumber(row.mean_diff_aaa_minus_indie);
+        return {
+          feature: String(row.feature ?? ""),
+          q,
+          score: q !== null ? -Math.log10(Math.max(q, 1e-12)) : null,
+          diff,
+        };
+      })
+      .filter((row) => row.feature && row.q !== null && row.score !== null)
+      .sort((a, b) => (a.q ?? Infinity) - (b.q ?? Infinity))
+      .slice(0, 15);
+    if (top.length > 0) {
+      const ordered = [...top].reverse();
+      Plotly.react(
+        els.thesisStatsPlot,
+        [
+          {
+            type: "bar",
+            orientation: "h",
+            y: ordered.map((r) => r.feature),
+            x: ordered.map((r) => r.score),
+            marker: {
+              color: ordered.map((r) => ((r.diff ?? 0) >= 0 ? "#ef4444" : "#2563eb")),
+            },
+            hovertemplate:
+              "%{y}<br>-log10(q)=%{x:.3f}<br>" +
+              "Color: red=AAA higher, blue=Indie higher<extra></extra>",
+          },
+        ],
+        {
+          title: "Most Significant Thesis Features (Permutation + BH)",
+          margin: { l: 230, r: 24, t: 46, b: 40 },
+          paper_bgcolor: "rgba(0,0,0,0)",
+          plot_bgcolor: "rgba(0,0,0,0)",
+          xaxis: { title: "-log10(q-value)" },
+        },
+        { responsive: true, displaylogo: false }
+      );
+    } else {
+      Plotly.purge(els.thesisStatsPlot);
+    }
+  }
+}
+
+function renderThesisSection(thesisData) {
+  if (!els.thesisStatus) return;
+  if (!thesisData || !thesisData.report) {
+    clearThesisViews();
+    setThesisStatus(
+      "No thesis output found yet. Run: python src/thesis_attribute_analysis.py --output-dir web/data/thesis"
+    );
+    return;
+  }
+
+  const report = thesisData.report;
+  const metrics = report.classifier_metrics || {};
+  const classCounts = report.class_counts || {};
+
+  if (els.thesisMetrics) {
+    els.thesisMetrics.innerHTML = "";
+    appendMetricCard("Unit of Analysis", String(report.unit_of_analysis || "game"));
+    appendMetricCard("Rows Used", String(report.num_rows_modeling ?? "n/a"));
+    appendMetricCard("Indie Rows", String(classCounts.indie ?? "n/a"));
+    appendMetricCard("AAA Rows", String(classCounts.aaa ?? "n/a"));
+    appendMetricCard("Balanced Accuracy", formatMetricValue(metrics.balanced_accuracy, 3));
+    appendMetricCard("F1 Score", formatMetricValue(metrics.f1, 3));
+    appendMetricCard("ROC AUC", formatMetricValue(metrics.roc_auc, 3));
+  }
+
+  renderThesisPlots(thesisData.importanceRows, thesisData.statsRows);
+  renderThesisTopTable(thesisData.statsRows);
+
+  const createdAt = report.created_at_utc ? ` (updated: ${report.created_at_utc})` : "";
+  setThesisStatus(`Loaded thesis attribute outputs${createdAt}`);
+}
+
+async function loadThesisData() {
+  const report = await fetchOptionalJson([
+    "data/thesis/attribute_analysis_report.json",
+    "/data/thesis/attribute_analysis_report.json",
+  ]);
+  if (!report) return null;
+
+  const [importanceRows, statsRows] = await Promise.all([
+    fetchOptionalCsv([
+      "data/thesis/attribute_feature_importance.csv",
+      "/data/thesis/attribute_feature_importance.csv",
+    ]),
+    fetchOptionalCsv([
+      "data/thesis/attribute_feature_stats.csv",
+      "/data/thesis/attribute_feature_stats.csv",
+    ]),
+  ]);
+
+  return {
+    report,
+    importanceRows: Array.isArray(importanceRows) ? importanceRows : [],
+    statsRows: Array.isArray(statsRows) ? statsRows : [],
+  };
+}
+
+async function refreshThesisSection(showError = false) {
+  try {
+    const thesisData = await loadThesisData();
+    state.thesisData = thesisData;
+    renderThesisSection(thesisData);
+  } catch (err) {
+    clearThesisViews();
+    const message = formatNetworkError(err, "Loading thesis data");
+    setThesisStatus(showError ? message : "Thesis data unavailable right now.", showError);
+  }
 }
 
 async function loadDefaultData() {
@@ -667,6 +1039,62 @@ function renderHeatmap(container, xLabels, yLabels, matrix, title) {
   Plotly.react(container, [trace], layout, { responsive: true, displaylogo: false });
 }
 
+function subsetSymmetricMatrix(labels, matrix, subsetLabels) {
+  const indexMap = new Map(labels.map((label, idx) => [label, idx]));
+  return subsetLabels.map((rowLabel) => {
+    const rowIdx = indexMap.get(rowLabel);
+    return subsetLabels.map((colLabel) => {
+      const colIdx = indexMap.get(colLabel);
+      if (rowIdx == null || colIdx == null) return 0;
+      const row = Array.isArray(matrix[rowIdx]) ? matrix[rowIdx] : [];
+      const value = row[colIdx];
+      return Number.isFinite(value) ? Number(value) : 0;
+    });
+  });
+}
+
+function pickReadableCentroidGames(labels, samples, maxPerGroup = 5) {
+  const groupByGame = new Map();
+  for (const sample of samples) {
+    if (!groupByGame.has(sample.label)) {
+      groupByGame.set(sample.label, normalizeGroupName(sample.group));
+    }
+  }
+
+  const indie = [];
+  const aaa = [];
+  const other = [];
+
+  for (const label of labels) {
+    const group = groupByGame.get(label) || "unassigned";
+    if (group === "indie") {
+      if (indie.length < maxPerGroup) indie.push(label);
+      continue;
+    }
+    if (group === "aaa") {
+      if (aaa.length < maxPerGroup) aaa.push(label);
+      continue;
+    }
+    other.push(label);
+  }
+
+  const chosen = [...indie, ...aaa];
+  const target = Math.min(labels.length, maxPerGroup * 2);
+  if (chosen.length < target) {
+    for (const label of other) {
+      if (chosen.length >= target) break;
+      if (!chosen.includes(label)) chosen.push(label);
+    }
+  }
+  if (chosen.length < target) {
+    for (const label of labels) {
+      if (chosen.length >= target) break;
+      if (!chosen.includes(label)) chosen.push(label);
+    }
+  }
+  return chosen;
+}
+
 function renderClusterTable(crosstab) {
   const games = Object.keys(crosstab || {}).sort((a, b) => a.localeCompare(b));
   const clusterIds = uniqueSorted(games.flatMap((g) => Object.keys(crosstab[g] || {}))).sort(
@@ -763,6 +1191,10 @@ function drawNeighborhoodExplorer(samples, colorMap) {
   ctx.fillRect(0, 0, width, height);
 
   if (!Array.isArray(samples) || samples.length < 2) {
+    state.latestRadiusProjection = [];
+    if (els.radiusHover) {
+      els.radiusHover.textContent = "Need at least 2 samples to render neighborhood explorer.";
+    }
     ctx.fillStyle = "#475569";
     ctx.font = "16px 'Space Grotesk', sans-serif";
     ctx.fillText("Need at least 2 samples to render neighborhood explorer.", 20, 36);
@@ -772,6 +1204,7 @@ function drawNeighborhoodExplorer(samples, colorMap) {
   const key = state.radiusParams.useTsne ? "tsne" : "umap";
   const points2D = get2DPoints(samples, key);
   const projected = projectPoints(points2D, width, height, 28);
+  state.latestRadiusProjection = projected.map((p) => ({ px: p.px, py: p.py, label: p.label }));
   const n = projected.length;
   const k = Math.max(1, Math.min(state.radiusParams.nNearest, n - 1));
   const extentFactor = state.radiusParams.extentPct / 100;
@@ -837,6 +1270,42 @@ function drawNeighborhoodExplorer(samples, colorMap) {
     20,
     24
   );
+}
+
+function onRadiusCanvasPointerMove(event) {
+  if (!els.radiusCanvas || !els.radiusHover) return;
+  const points = state.latestRadiusProjection;
+  if (!Array.isArray(points) || points.length === 0) {
+    els.radiusHover.textContent = "Hover a dot to see its game name.";
+    return;
+  }
+
+  const rect = els.radiusCanvas.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+
+  let bestPoint = null;
+  let bestDist = Infinity;
+  for (const point of points) {
+    const dx = point.px - x;
+    const dy = point.py - y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestPoint = point;
+    }
+  }
+
+  if (bestPoint && bestDist <= 14) {
+    els.radiusHover.textContent = `Hover: ${bestPoint.label}`;
+  } else {
+    els.radiusHover.textContent = "Hover a dot to see its game name.";
+  }
+}
+
+function onRadiusCanvasPointerLeave() {
+  if (!els.radiusHover) return;
+  els.radiusHover.textContent = "Hover a dot to see its game name.";
 }
 
 class Thumbnail3DMap {
@@ -1149,6 +1618,7 @@ function renderCanvasVisuals(samples, colorMap) {
   state.latestCanvasRender.samples = samples;
   state.latestCanvasRender.colorMap = colorMap;
   drawNeighborhoodExplorer(samples, colorMap);
+  renderGameLegend(els.radiusLegend, samples, colorMap);
   renderImage3DMaps(samples, colorMap);
 }
 
@@ -1180,7 +1650,29 @@ function renderAll() {
 
   const centroid = state.data.centroid_similarity;
   if (centroid && Array.isArray(centroid.labels) && Array.isArray(centroid.matrix)) {
-    renderHeatmap(els.centroidHeatmap, centroid.labels, centroid.labels, centroid.matrix, "Game Centroid Cosine Similarity");
+    const selectedGames = new Set(selectedSamples.map((sample) => sample.label));
+    const visibleLabels = centroid.labels.filter((label) => selectedGames.has(label));
+    const readableLabels = pickReadableCentroidGames(visibleLabels, selectedSamples, 5);
+    if (readableLabels.length >= 2) {
+      const readableMatrix = subsetSymmetricMatrix(centroid.labels, centroid.matrix, readableLabels);
+      const hasBothGroups =
+        readableLabels.some((label) =>
+          selectedSamples.some((sample) => sample.label === label && normalizeGroupName(sample.group) === "indie")
+        ) &&
+        readableLabels.some((label) =>
+          selectedSamples.some((sample) => sample.label === label && normalizeGroupName(sample.group) === "aaa")
+        );
+      const subtitle = hasBothGroups ? "(up to 5 indie + 5 aaa)" : "(up to 10 selected games)";
+      renderHeatmap(
+        els.centroidHeatmap,
+        readableLabels,
+        readableLabels,
+        readableMatrix,
+        `Game Centroid Cosine Similarity ${subtitle}`
+      );
+    } else {
+      Plotly.purge(els.centroidHeatmap);
+    }
   } else {
     Plotly.purge(els.centroidHeatmap);
   }
@@ -1198,12 +1690,20 @@ function renderAll() {
   }
 
   const prompts = state.data.prompt_similarity;
+  const promptFocusMeta = state.data.runtime_parameters?.prompt_focus || null;
+  const promptFocusSuffix =
+    promptFocusMeta &&
+    Number.isFinite(Number(promptFocusMeta.display_prompt_count)) &&
+    Number.isFinite(Number(promptFocusMeta.full_prompt_count)) &&
+    Number(promptFocusMeta.display_prompt_count) < Number(promptFocusMeta.full_prompt_count)
+      ? ` (focused ${Number(promptFocusMeta.display_prompt_count)}/${Number(promptFocusMeta.full_prompt_count)} prompts)`
+      : "";
   if (prompts && Array.isArray(prompts.prompts) && Array.isArray(prompts.games) && Array.isArray(prompts.matrix)) {
     const source = typeof prompts.source === "string" ? prompts.source : "clip_text_prompts";
     const title =
       source === "style_adapter"
-        ? "Fine-Tuned Style Adapter Scores by Game"
-        : "CLIP Prompt Similarity (Average by Game)";
+        ? `Fine-Tuned Style Adapter Scores by Game${promptFocusSuffix}`
+        : `CLIP Prompt Similarity (Average by Game)${promptFocusSuffix}`;
     renderHeatmap(els.promptHeatmap, prompts.prompts, prompts.games, prompts.matrix, title);
   } else {
     Plotly.purge(els.promptHeatmap);
@@ -1218,8 +1718,8 @@ function renderAll() {
     const source = typeof promptByGroup.source === "string" ? promptByGroup.source : "clip_text_prompts";
     const title =
       source === "style_adapter"
-        ? "Fine-Tuned Style Adapter Scores by Group"
-        : "CLIP Prompt Similarity by Group";
+        ? `Fine-Tuned Style Adapter Scores by Group${promptFocusSuffix}`
+        : `CLIP Prompt Similarity by Group${promptFocusSuffix}`;
     renderHeatmap(els.promptGroupHeatmap, promptByGroup.prompts, promptByGroup.groups, promptByGroup.matrix, title);
   } else {
     Plotly.purge(els.promptGroupHeatmap);
@@ -1264,6 +1764,7 @@ async function applyData(rawData) {
   );
   populateGroupFilter(groups);
   renderAll();
+  await refreshThesisSection(false);
 }
 
 async function onRunAnalysisClick() {
@@ -1430,6 +1931,15 @@ function bindEvents() {
   }
   if (els.radiusUseTsneCheck) {
     els.radiusUseTsneCheck.addEventListener("change", onRadiusInputChange);
+  }
+  if (els.loadThesisBtn) {
+    els.loadThesisBtn.addEventListener("click", () => {
+      refreshThesisSection(true);
+    });
+  }
+  if (els.radiusCanvas) {
+    els.radiusCanvas.addEventListener("pointermove", onRadiusCanvasPointerMove);
+    els.radiusCanvas.addEventListener("pointerleave", onRadiusCanvasPointerLeave);
   }
   if (els.presetLocalBtn) {
     els.presetLocalBtn.addEventListener("click", () => applyPreset("local"));

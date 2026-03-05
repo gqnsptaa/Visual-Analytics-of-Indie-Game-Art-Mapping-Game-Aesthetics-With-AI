@@ -62,6 +62,9 @@ DEFAULT_STYLE_PROMPTS = [
     "halftone print texture",
     "gothic ornamental art direction",
     "minimal diegetic UI",
+    "Narrative-Driven Cover",
+    "Symbolic-Driven Cover",
+    "Multimodal Design",
 ]
 
 
@@ -162,6 +165,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--batch-size", type=int, default=32, help="CLIP encoding batch size.")
     parser.add_argument(
+        "--progress-every-batches",
+        type=int,
+        default=5,
+        help="Print CLIP encoding progress every N batches (min 1).",
+    )
+    parser.add_argument(
         "--device",
         type=str,
         default="auto",
@@ -204,6 +213,15 @@ def parse_args() -> argparse.Namespace:
         help="Optional text file with one style prompt per line.",
     )
     parser.add_argument(
+        "--prompt-focus-file",
+        type=Path,
+        default=Path("src/style_prompts_graphic_design_focus.txt"),
+        help=(
+            "Optional prompt subset file for cleaner UI heatmaps. "
+            "CLIP still scores full prompt list; this only filters displayed/exported prompt matrices."
+        ),
+    )
+    parser.add_argument(
         "--game-groups-file",
         type=Path,
         default=Path("src/game_groups.csv"),
@@ -231,6 +249,36 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=48,
         help="Thumbnail square size in pixels when --export-thumbnails is enabled.",
+    )
+    parser.add_argument(
+        "--thumbnail-progress-every",
+        type=int,
+        default=50,
+        help="Print thumbnail export progress every N images (min 1).",
+    )
+    parser.add_argument(
+        "--thumbnail-jpeg-quality",
+        type=int,
+        default=82,
+        help="JPEG quality for exported thumbnails (1-95). Lower is faster/smaller.",
+    )
+    parser.add_argument(
+        "--thumbnail-optimize",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable JPEG optimize pass for thumbnails (slower).",
+    )
+    parser.add_argument(
+        "--debug-vector-preview",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Print one image embedding vector and one prompt embedding vector preview.",
+    )
+    parser.add_argument(
+        "--debug-vector-preview-dims",
+        type=int,
+        default=12,
+        help="How many leading dimensions to print for --debug-vector-preview (1-128).",
     )
     return parser.parse_args()
 
@@ -337,6 +385,88 @@ def load_style_prompts(path: Path | None) -> list[str]:
     return prompts
 
 
+def load_prompt_focus(path: Path | None) -> list[str]:
+    """Load optional prompt subset for cleaner UI heatmaps."""
+    if path is None:
+        return []
+    if not path.exists():
+        return []
+
+    raw = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    focus: list[str] = []
+    seen: set[str] = set()
+    for prompt in raw:
+        key = prompt.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        focus.append(prompt)
+    return focus
+
+
+def resolve_prompt_focus_indices(all_prompts: list[str], focus_prompts: list[str]) -> tuple[list[int], dict]:
+    """Resolve focus prompts against available prompts (case-insensitive)."""
+    total = len(all_prompts)
+    if total == 0:
+        return [], {"enabled": False, "reason": "no_prompts", "total_prompts": 0}
+
+    if not focus_prompts:
+        return list(range(total)), {
+            "enabled": False,
+            "reason": "focus_file_empty_or_missing",
+            "total_prompts": total,
+            "focus_requested": 0,
+            "selected_prompts": total,
+            "missing_prompts": [],
+        }
+
+    index_by_key: dict[str, int] = {}
+    for idx, prompt in enumerate(all_prompts):
+        key = prompt.strip().lower()
+        if key and key not in index_by_key:
+            index_by_key[key] = idx
+
+    selected_indices: list[int] = []
+    missing: list[str] = []
+    for prompt in focus_prompts:
+        idx = index_by_key.get(prompt.strip().lower())
+        if idx is None:
+            missing.append(prompt)
+            continue
+        selected_indices.append(idx)
+
+    if not selected_indices:
+        return list(range(total)), {
+            "enabled": False,
+            "reason": "no_focus_matches_in_prompt_set",
+            "total_prompts": total,
+            "focus_requested": len(focus_prompts),
+            "selected_prompts": total,
+            "missing_prompts": missing,
+        }
+
+    return selected_indices, {
+        "enabled": True,
+        "reason": "focus_applied",
+        "total_prompts": total,
+        "focus_requested": len(focus_prompts),
+        "selected_prompts": len(selected_indices),
+        "missing_prompts": missing,
+    }
+
+
+def select_prompt_columns(
+    all_prompts: list[str],
+    matrix: np.ndarray,
+    selected_indices: list[int],
+) -> tuple[list[str], np.ndarray]:
+    if not selected_indices:
+        return [], np.zeros((matrix.shape[0], 0), dtype=np.float32)
+    selected_prompts = [all_prompts[idx] for idx in selected_indices]
+    selected_matrix = matrix[:, selected_indices].astype(np.float32, copy=False)
+    return selected_prompts, selected_matrix
+
+
 def normalize_group_name(raw_value: str) -> str:
     value = raw_value.strip().lower()
     value = value.replace("-", "_").replace(" ", "_")
@@ -416,11 +546,17 @@ def encode_images(adapter: ClipAdapter, records: list[ImageRecord], batch_size: 
     rec_buffer: list[ImageRecord] = []
 
     use_amp = adapter.device.type == "cuda"
+    scanned_count = 0
+    batch_count = 0
+    total_records = len(records)
+    progress_every = max(1, int(getattr(adapter, "progress_every_batches", 5)))
 
     def flush_batch() -> None:
+        nonlocal batch_count
         if not image_buffer:
             return
 
+        batch_count += 1
         batch_tensor = torch.stack(image_buffer).to(adapter.device, non_blocking=True)
         with torch.inference_mode():
             if use_amp:
@@ -431,10 +567,19 @@ def encode_images(adapter: ClipAdapter, records: list[ImageRecord], batch_size: 
 
         batches.append(emb.detach().cpu().numpy().astype(np.float32))
         valid_records.extend(rec_buffer)
+        if batch_count == 1 or batch_count % progress_every == 0:
+            print(
+                "[CLIP] Encoded batch "
+                f"{batch_count} | batch_size={len(rec_buffer)} | "
+                f"scanned={scanned_count}/{total_records} | "
+                f"valid={len(valid_records)} | skipped={len(skipped)}",
+                flush=True,
+            )
         image_buffer.clear()
         rec_buffer.clear()
 
     for rec in records:
+        scanned_count += 1
         try:
             with Image.open(rec.path) as img:
                 tensor = adapter.preprocess(img.convert("RGB"))
@@ -459,6 +604,11 @@ def encode_images(adapter: ClipAdapter, records: list[ImageRecord], batch_size: 
     if not batches:
         raise PipelineError("No valid images were encoded. Check image files and supported extensions.")
 
+    print(
+        "[CLIP] Encoding complete | "
+        f"batches={batch_count} | valid={len(valid_records)} | skipped={len(skipped)}",
+        flush=True,
+    )
     return np.vstack(batches), valid_records, skipped
 
 
@@ -717,17 +867,26 @@ def export_sample_thumbnails(
     records: list[ImageRecord],
     output_dir: Path,
     thumbnail_size: int,
+    progress_every: int,
+    jpeg_quality: int,
+    optimize_jpeg: bool,
 ) -> dict[int, str]:
     """Export thumbnails and return mapping image_id -> relative web path."""
     if thumbnail_size < 16 or thumbnail_size > 512:
         raise PipelineError("thumbnail-size must be between 16 and 512.")
+    if jpeg_quality < 1 or jpeg_quality > 95:
+        raise PipelineError("thumbnail-jpeg-quality must be between 1 and 95.")
 
     thumbs_dir = output_dir / "thumbs"
     thumbs_dir.mkdir(parents=True, exist_ok=True)
     mapping: dict[int, str] = {}
+    progress_every = max(1, int(progress_every))
+    total = len(records)
+    exported = 0
+    failed = 0
 
     # Keep center composition consistent by padding each image into a square canvas.
-    for rec in records:
+    for idx, rec in enumerate(records, start=1):
         out_path = thumbs_dir / f"{rec.image_id}.jpg"
         try:
             with Image.open(rec.path) as img:
@@ -740,11 +899,19 @@ def export_sample_thumbnails(
                     (thumbnail_size - image.height) // 2,
                 )
                 canvas.paste(image, offset)
-                canvas.save(out_path, format="JPEG", quality=85, optimize=True)
+                canvas.save(out_path, format="JPEG", quality=jpeg_quality, optimize=optimize_jpeg)
             mapping[rec.image_id] = f"data/thumbs/{rec.image_id}.jpg"
+            exported += 1
         except Exception:
             # Thumbnail export is optional; skip failures without aborting analysis.
+            failed += 1
             continue
+        if idx == 1 or idx % progress_every == 0 or idx == total:
+            print(
+                "[Thumbs] Export progress "
+                f"{idx}/{total} | exported={exported} | failed={failed}",
+                flush=True,
+            )
 
     return mapping
 
@@ -764,9 +931,68 @@ def atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None
     tmp_path.replace(path)
 
 
+def format_vector_preview(vector: np.ndarray, dims: int) -> str:
+    safe_dims = max(1, min(int(dims), int(vector.shape[0])))
+    values = ", ".join(f"{float(v):+.5f}" for v in vector[:safe_dims])
+    return f"[{values}]"
+
+
+def log_vector_preview(
+    valid_records: list[ImageRecord],
+    embeddings: np.ndarray,
+    prompts: list[str],
+    text_features: np.ndarray,
+    preview_dims: int,
+) -> None:
+    """Print one sample image/prompt embedding and similarity diagnostics."""
+    if embeddings.shape[0] == 0 or text_features.shape[0] == 0:
+        print("[Debug] Vector preview skipped: embeddings/prompts are empty.", flush=True)
+        return
+
+    sample_idx = 0
+    prompt_idx = 0
+    sample = valid_records[sample_idx]
+    image_vec = embeddings[sample_idx]
+    prompt_vec = text_features[prompt_idx]
+    sims = image_vec @ text_features.T
+    best_idx = int(np.argmax(sims))
+    best_score = float(sims[best_idx])
+
+    print("[Debug] --- CLIP Vector Preview ---", flush=True)
+    print(
+        f"[Debug] Image sample: game='{sample.label}', file='{sample.path.name}', embedding_dim={image_vec.shape[0]}",
+        flush=True,
+    )
+    print(
+        f"[Debug] Image vector first {max(1, min(preview_dims, image_vec.shape[0]))} dims: "
+        f"{format_vector_preview(image_vec, preview_dims)}",
+        flush=True,
+    )
+    print(
+        f"[Debug] Prompt sample: '{prompts[prompt_idx]}', embedding_dim={prompt_vec.shape[0]}",
+        flush=True,
+    )
+    print(
+        f"[Debug] Prompt vector first {max(1, min(preview_dims, prompt_vec.shape[0]))} dims: "
+        f"{format_vector_preview(prompt_vec, preview_dims)}",
+        flush=True,
+    )
+    print(
+        f"[Debug] Similarity(image, prompt[0])={float(sims[prompt_idx]):+.5f} | "
+        f"best_prompt='{prompts[best_idx]}' score={best_score:+.5f}",
+        flush=True,
+    )
+    print("[Debug] ---------------------------", flush=True)
+
+
 def run() -> int:
     args = parse_args()
     set_seed(args.seed)
+    if args.debug_vector_preview_dims < 1 or args.debug_vector_preview_dims > 128:
+        raise PipelineError("debug-vector-preview-dims must be between 1 and 128.")
+
+    def log(message: str) -> None:
+        print(message, flush=True)
 
     output_dir: Path = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -779,6 +1005,7 @@ def run() -> int:
     if not valid_ext:
         raise PipelineError("No valid image extensions provided.")
 
+    log("[Init] Selecting device and scanning dataset...")
     device = choose_device(args.device)
     records = collect_image_records(DATASET_ROOT, valid_ext, args.max_images)
     if not records:
@@ -787,14 +1014,20 @@ def run() -> int:
             f"{DATASET_ROOT}/GameName/*.jpg"
         )
 
+    log("[Init] Loading CLIP backend (this can take time on first run)...")
     adapter = load_clip_adapter(args.clip_backend, args.model_name, device)
+    # Attach progress frequency as lightweight runtime metadata for encode_images.
+    setattr(adapter, "progress_every_batches", max(1, args.progress_every_batches))
+    log("[Init] Loading prompts and group mapping...")
     prompts = load_style_prompts(args.style_prompts_file)
+    prompt_focus = load_prompt_focus(args.prompt_focus_file)
     game_group_map = load_game_groups(args.game_groups_file)
 
-    print(f"Dataset source: local-only ({DATASET_ROOT})")
-    print(f"Found {len(records)} image candidates across {len(set(r.label for r in records))} games.")
-    print(f"Running CLIP on device={device.type} backend={adapter.backend_name} model={args.model_name}")
+    log(f"Dataset source: local-only ({DATASET_ROOT})")
+    log(f"Found {len(records)} image candidates across {len(set(r.label for r in records))} games.")
+    log(f"Running CLIP on device={device.type} backend={adapter.backend_name} model={args.model_name}")
 
+    log("[Step 1/7] Encoding images with CLIP...")
     embeddings, valid_records, skipped_images = encode_images(adapter, records, args.batch_size)
     labels = [r.label for r in valid_records]
     sample_groups = [game_group_map.get(label, "unassigned") for label in labels]
@@ -805,29 +1038,41 @@ def run() -> int:
     if len(valid_records) < 2:
         raise PipelineError("Need at least 2 valid images after filtering/skips.")
 
+    log("[Step 2/7] Computing 3D t-SNE and UMAP coordinates...")
     tsne_points, tsne_meta = adaptive_tsne_3d(embeddings, args.tsne_perplexity, args.seed)
     umap_points, umap_meta = adaptive_umap_3d(embeddings, args.umap_n_neighbors, args.umap_min_dist, args.seed)
 
+    log("[Step 3/7] Computing centroid similarity matrices...")
     unique_games, centroid_matrix = normalized_centroids(embeddings, labels)
     similarity_matrix = cosine_similarity_matrix(centroid_matrix)
     unique_groups, group_centroids = normalized_centroids(embeddings, sample_groups)
     group_similarity_matrix = cosine_similarity_matrix(group_centroids)
 
+    log("[Step 4/7] Running KMeans clustering...")
     cluster_ids, kmeans_meta = safe_kmeans(embeddings, labels, args.kmeans_k, args.seed)
     cluster_crosstab = crosstab_counts(labels, cluster_ids)
 
+    log("[Step 5/7] Scoring prompts against CLIP embeddings...")
     with torch.inference_mode():
         text_features = adapter.encode_text(prompts).detach().cpu().numpy().astype(np.float32)
+    if args.debug_vector_preview:
+        log_vector_preview(
+            valid_records=valid_records,
+            embeddings=embeddings,
+            prompts=prompts,
+            text_features=text_features,
+            preview_dims=args.debug_vector_preview_dims,
+        )
 
     clip_prompt_games, clip_game_prompt_scores, clip_sample_prompt_scores = prompt_similarity_by_game(
         embeddings, labels, text_features
     )
     clip_prompt_groups, clip_group_prompt_scores = average_scores_by_label(clip_sample_prompt_scores, sample_groups)
     prompt_games = clip_prompt_games
-    prompt_labels = list(prompts)
-    game_prompt_scores = clip_game_prompt_scores
     prompt_groups = clip_prompt_groups
-    group_prompt_scores = clip_group_prompt_scores
+    full_prompt_labels = list(prompts)
+    full_game_prompt_scores = clip_game_prompt_scores
+    full_group_prompt_scores = clip_group_prompt_scores
     prompt_source = "clip_text_prompts"
     style_adapter_meta: dict = {"enabled": False}
     style_sample_predictions = [
@@ -836,6 +1081,7 @@ def run() -> int:
     ]
 
     if args.style_adapter_checkpoint is not None:
+        log("[Step 5b/7] Applying style adapter checkpoint...")
         (
             adapter_games,
             adapter_scores,
@@ -845,21 +1091,46 @@ def run() -> int:
             style_meta,
         ) = run_style_adapter_inference(embeddings, labels, args.style_adapter_checkpoint)
         prompt_games = adapter_games
-        prompt_labels = adapter_labels
-        game_prompt_scores = adapter_scores
-        prompt_groups, group_prompt_scores = average_scores_by_label(adapter_sample_scores, sample_groups)
+        full_prompt_labels = adapter_labels
+        full_game_prompt_scores = adapter_scores
+        prompt_groups, full_group_prompt_scores = average_scores_by_label(adapter_sample_scores, sample_groups)
         prompt_source = "style_adapter"
         style_adapter_meta = {
             "enabled": True,
             **style_meta,
         }
-        print(f"Using style adapter checkpoint: {args.style_adapter_checkpoint}")
+        log(f"Using style adapter checkpoint: {args.style_adapter_checkpoint}")
+
+    selected_prompt_indices, prompt_focus_meta = resolve_prompt_focus_indices(full_prompt_labels, prompt_focus)
+    prompt_labels, game_prompt_scores = select_prompt_columns(
+        all_prompts=full_prompt_labels,
+        matrix=full_game_prompt_scores,
+        selected_indices=selected_prompt_indices,
+    )
+    _, group_prompt_scores = select_prompt_columns(
+        all_prompts=full_prompt_labels,
+        matrix=full_group_prompt_scores,
+        selected_indices=selected_prompt_indices,
+    )
+    if prompt_focus_meta.get("enabled"):
+        log(
+            "[Step 5c/7] Applied prompt focus subset "
+            f"{prompt_focus_meta.get('selected_prompts')}/{prompt_focus_meta.get('total_prompts')} prompts "
+            f"from {args.prompt_focus_file}"
+        )
+    else:
+        reason = str(prompt_focus_meta.get("reason", "unknown"))
+        log(f"[Step 5c/7] Prompt focus not applied ({reason}); using all {len(full_prompt_labels)} prompts.")
     thumbnail_map: dict[int, str] = {}
     if args.export_thumbnails:
+        log("[Step 6/7] Exporting thumbnails...")
         thumbnail_map = export_sample_thumbnails(
             records=valid_records,
             output_dir=output_dir,
             thumbnail_size=args.thumbnail_size,
+            progress_every=args.thumbnail_progress_every,
+            jpeg_quality=args.thumbnail_jpeg_quality,
+            optimize_jpeg=args.thumbnail_optimize,
         )
 
     samples = []
@@ -908,6 +1179,12 @@ def run() -> int:
             "tsne": tsne_meta,
             "umap": umap_meta,
             "kmeans": kmeans_meta,
+            "prompt_focus": {
+                **prompt_focus_meta,
+                "source_file": str(args.prompt_focus_file) if args.prompt_focus_file is not None else None,
+                "full_prompt_count": len(full_prompt_labels),
+                "display_prompt_count": len(prompt_labels),
+            },
             "style_adapter": style_adapter_meta,
             "thumbnails": {
                 "enabled": bool(args.export_thumbnails),
@@ -934,6 +1211,12 @@ def run() -> int:
             "matrix": [[float(v) for v in row] for row in game_prompt_scores.tolist()],
             "source": prompt_source,
         },
+        "prompt_similarity_full": {
+            "games": prompt_games,
+            "prompts": full_prompt_labels,
+            "matrix": [[float(v) for v in row] for row in full_game_prompt_scores.tolist()],
+            "source": prompt_source,
+        },
         "clip_prompt_similarity": {
             "games": clip_prompt_games,
             "prompts": prompts,
@@ -946,6 +1229,12 @@ def run() -> int:
             "matrix": [[float(v) for v in row] for row in group_prompt_scores.tolist()],
             "source": prompt_source,
         },
+        "prompt_similarity_by_group_full": {
+            "groups": prompt_groups,
+            "prompts": full_prompt_labels,
+            "matrix": [[float(v) for v in row] for row in full_group_prompt_scores.tolist()],
+            "source": prompt_source,
+        },
         "clip_prompt_similarity_by_group": {
             "groups": clip_prompt_groups,
             "prompts": prompts,
@@ -956,6 +1245,7 @@ def run() -> int:
     }
 
     json_path = output_dir / "analysis_results.json"
+    log("[Step 7/7] Writing JSON/CSV outputs...")
     atomic_write_text(json_path, json.dumps(results, indent=2), encoding="utf-8")
 
     sample_rows = []
@@ -1013,6 +1303,13 @@ def run() -> int:
             row[prompt] = float(game_prompt_scores[gi, pi])
         prompt_rows.append(row)
     write_csv(output_dir / "prompt_similarity_by_game.csv", prompt_rows, ["game", *prompt_labels])
+    full_prompt_rows = []
+    for gi, game in enumerate(prompt_games):
+        row = {"game": game}
+        for pi, prompt in enumerate(full_prompt_labels):
+            row[prompt] = float(full_game_prompt_scores[gi, pi])
+        full_prompt_rows.append(row)
+    write_csv(output_dir / "prompt_similarity_by_game_full.csv", full_prompt_rows, ["game", *full_prompt_labels])
 
     prompt_group_rows = []
     for gi, group in enumerate(prompt_groups):
@@ -1021,6 +1318,17 @@ def run() -> int:
             row[prompt] = float(group_prompt_scores[gi, pi])
         prompt_group_rows.append(row)
     write_csv(output_dir / "prompt_similarity_by_group.csv", prompt_group_rows, ["group", *prompt_labels])
+    full_prompt_group_rows = []
+    for gi, group in enumerate(prompt_groups):
+        row = {"group": group}
+        for pi, prompt in enumerate(full_prompt_labels):
+            row[prompt] = float(full_group_prompt_scores[gi, pi])
+        full_prompt_group_rows.append(row)
+    write_csv(
+        output_dir / "prompt_similarity_by_group_full.csv",
+        full_prompt_group_rows,
+        ["group", *full_prompt_labels],
+    )
 
     crosstab_rows = []
     for game, clusters in cluster_crosstab.items():
@@ -1031,13 +1339,18 @@ def run() -> int:
     if args.save_embeddings:
         np.save(output_dir / "clip_embeddings.npy", embeddings)
 
-    print(f"Saved JSON: {json_path}")
-    print(f"Saved CSV files in: {output_dir}")
+    log(f"Saved JSON: {json_path}")
+    log(f"Saved CSV files in: {output_dir}")
     if args.export_thumbnails:
-        print(f"Exported {len(thumbnail_map)} thumbnails to: {output_dir / 'thumbs'}")
+        log(f"Exported {len(thumbnail_map)} thumbnails to: {output_dir / 'thumbs'}")
     if style_adapter_meta.get("enabled"):
-        print(f"Style adapter source for prompt heatmap: {style_adapter_meta.get('checkpoint')}")
-    print(f"Processed {len(valid_records)} images (skipped {len(skipped_images)} unreadable files).")
+        log(f"Style adapter source for prompt heatmap: {style_adapter_meta.get('checkpoint')}")
+    log(
+        "Prompt outputs: "
+        f"display={len(prompt_labels)} prompts -> prompt_similarity_by_game.csv, "
+        f"full={len(full_prompt_labels)} prompts -> prompt_similarity_by_game_full.csv"
+    )
+    log(f"Processed {len(valid_records)} images (skipped {len(skipped_images)} unreadable files).")
     return 0
 
 

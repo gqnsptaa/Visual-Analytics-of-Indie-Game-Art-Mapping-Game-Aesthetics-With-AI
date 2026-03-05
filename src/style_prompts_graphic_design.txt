@@ -16,3 +16,6 @@ grainy lo-fi texture
 halftone print texture
 gothic ornamental art direction
 minimal diegetic UI
+Narrative-Driven Cover
+Symbolic-Driven Cover
+Multimodal Design

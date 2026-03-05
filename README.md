@@ -72,6 +72,19 @@ python src/clip_indie_pipeline.py \
   --style-prompts-file "src/style_prompts_graphic_design.txt"
 ```
 
+To use the expanded 108-prompt set while keeping UI heatmaps readable:
+
+```bash
+python src/clip_indie_pipeline.py \
+  --output-dir "web/data" \
+  --style-prompts-file "src/style_prompts_graphic_design_expanded.txt" \
+  --prompt-focus-file "src/style_prompts_graphic_design_focus.txt"
+```
+
+`--prompt-focus-file` filters only the displayed/exported heatmap prompt matrices
+to a curated subset (default: `src/style_prompts_graphic_design_focus.txt`).
+The full prompt set is still scored and exported to `*_full.csv` + JSON `*_full` sections.
+
 To use your fine-tuned style adapter checkpoint for the heatmap/scores:
 
 ```bash
@@ -87,6 +100,8 @@ Main output:
 - `web/data/centroid_similarity.csv`
 - `web/data/prompt_similarity_by_group.csv`
 - `web/data/prompt_similarity_by_game.csv`
+- `web/data/prompt_similarity_by_group_full.csv`
+- `web/data/prompt_similarity_by_game_full.csv`
 - `web/data/cluster_crosstab.csv`
 
 How CLIP uses prompts:
@@ -107,6 +122,8 @@ Then open `http://127.0.0.1:8000`.
 
 If `training_outputs/style_adapter/best_style_adapter.pt` exists, the Run Analysis button
 automatically passes it to the pipeline.
+If `src/style_prompts_graphic_design_expanded.txt` and
+`src/style_prompts_graphic_design_focus.txt` exist, Run Analysis also uses them automatically.
 
 From the page you can now click:
 - `Run Analysis` to execute the full Python pipeline.
@@ -157,6 +174,43 @@ Outputs:
 After training:
 - Run analysis with `--style-adapter-checkpoint ...` (or just click `Run Analysis` in UI if the default checkpoint path exists).
 - The `Prompt Similarity by Game` heatmap will switch to adapter-based style scores.
+
+## 7. Thesis Attribute Analysis (Indie vs AAA)
+
+Run the thesis-focused analysis script:
+
+```bash
+python src/thesis_attribute_analysis.py \
+  --output-dir web/data/thesis \
+  --device auto \
+  --clip-backend auto \
+  --model-name ViT-B/32
+```
+
+This script extracts and compares:
+- `color_*` features (saturation, luminance contrast, warm/cool usage, palette entropy)
+- `composition_*` features (center bias, rule-of-thirds energy, left-right symmetry, negative space)
+- `texture_*` features (entropy, Laplacian variance, local contrast, high-frequency ratio)
+- `typography_*` proxies (edge density, horizontal-vs-vertical stroke ratio, text-like edge density)
+- `affect_*` CLIP prompt scores (default affective prompts or custom list)
+
+By default it aggregates features at **game level** (`--use-game-aggregation`) and trains a
+balanced logistic classifier for `indie` vs `aaa`.
+
+Outputs:
+- `web/data/thesis/attribute_features_per_image.csv`
+- `web/data/thesis/attribute_features_modeling_table.csv`
+- `web/data/thesis/attribute_feature_group_means.csv`
+- `web/data/thesis/attribute_feature_importance.csv`
+- `web/data/thesis/attribute_feature_stats.csv`
+- `web/data/thesis/attribute_analysis_report.json`
+
+Optional custom affective prompts:
+
+```bash
+python src/thesis_attribute_analysis.py \
+  --affective-prompts-file src/affective_prompts_thesis.txt
+```
 
 ## Notes on Robustness and Performance
 

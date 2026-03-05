@@ -10,9 +10,9 @@
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260226a" />
+    <link rel="stylesheet" href="styles.css?v=20260303a" />
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
-    <script src="app.js?v=20260226a" defer></script>
+    <script src="app.js?v=20260303a" defer></script>
   </head>
   <body>
     <main class="app-shell">
@@ -107,6 +107,8 @@
           </label>
         </div>
         <canvas id="radiusCanvas" class="radius-canvas"></canvas>
+        <p id="radiusHover" class="map-hint">Hover a dot to see its game name.</p>
+        <div id="radiusLegend" class="image3d-legend radius-legend" aria-label="Neighborhood game legend"></div>
       </section>
 
       <section class="stack-1">
@@ -162,6 +164,31 @@
           <h2>Prompt Similarity by Group</h2>
           <div id="promptGroupHeatmap" class="plot plot-short"></div>
         </article>
+      </section>
+
+      <section class="card">
+        <h2>Thesis: Indie vs AAA Attribute Results</h2>
+        <div class="controls-row">
+          <button id="loadThesisBtn" class="btn btn-muted btn-small" type="button">Load Thesis Results</button>
+        </div>
+        <p id="thesisStatus" class="status thesis-status">Waiting for thesis data...</p>
+        <div id="thesisMetrics" class="metrics-grid"></div>
+        <div id="thesisImportancePlot" class="plot plot-short"></div>
+        <div id="thesisStatsPlot" class="plot plot-short"></div>
+        <div class="table-wrap">
+          <table id="thesisTopFeaturesTable">
+            <thead>
+              <tr>
+                <th>Feature</th>
+                <th>Mean Indie</th>
+                <th>Mean AAA</th>
+                <th>AAA - Indie</th>
+                <th>q (BH)</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </section>
 
       <section class="card">

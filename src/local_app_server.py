@@ -26,6 +26,8 @@ WEB_DIR = PROJECT_ROOT / "web"
 PIPELINE_PATH = PROJECT_ROOT / "src" / "clip_indie_pipeline.py"
 OUTPUT_DIR = WEB_DIR / "data"
 DEFAULT_STYLE_ADAPTER_CKPT = PROJECT_ROOT / "training_outputs" / "style_adapter" / "best_style_adapter.pt"
+DEFAULT_STYLE_PROMPTS_FILE = PROJECT_ROOT / "src" / "style_prompts_graphic_design_expanded.txt"
+DEFAULT_PROMPT_FOCUS_FILE = PROJECT_ROOT / "src" / "style_prompts_graphic_design_focus.txt"
 MAX_REQUEST_BYTES = 64 * 1024
 
 
@@ -170,6 +172,12 @@ class AnalysisRunner:
         if DEFAULT_STYLE_ADAPTER_CKPT.exists():
             cmd.extend(["--style-adapter-checkpoint", str(DEFAULT_STYLE_ADAPTER_CKPT)])
             self._append_output(f"[info] style adapter checkpoint: {DEFAULT_STYLE_ADAPTER_CKPT}\n")
+        if DEFAULT_STYLE_PROMPTS_FILE.exists():
+            cmd.extend(["--style-prompts-file", str(DEFAULT_STYLE_PROMPTS_FILE)])
+            self._append_output(f"[info] style prompts file: {DEFAULT_STYLE_PROMPTS_FILE}\n")
+        if DEFAULT_PROMPT_FOCUS_FILE.exists():
+            cmd.extend(["--prompt-focus-file", str(DEFAULT_PROMPT_FOCUS_FILE)])
+            self._append_output(f"[info] prompt focus file: {DEFAULT_PROMPT_FOCUS_FILE}\n")
 
         try:
             process = subprocess.Popen(
