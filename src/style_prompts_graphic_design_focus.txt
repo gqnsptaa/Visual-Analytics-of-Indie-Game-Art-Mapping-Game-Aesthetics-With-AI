@@ -1,0 +1,27 @@
+neon color palette
+pastel color palette
+monochrome color palette
+limited color palette
+warm color palette
+cool color palette
+dark color palette
+bright color palette
+pixel art typography
+minimalist UI typography
+diegetic game interface
+cyberpunk interface typography
+minimalist composition
+symmetrical composition
+asymmetrical composition
+dynamic action composition
+cinematic framing
+hand-painted textures
+photorealistic textures
+pixel textures
+painterly brush textures
+physically based rendering
+cel shaded rendering
+low poly rendering
+Narrative-Driven Cover
+Symbolic-Driven Cover
+Multimodal Design
