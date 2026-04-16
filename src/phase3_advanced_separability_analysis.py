@@ -44,7 +44,8 @@ except Exception as exc:  # pragma: no cover
         "Install dependencies from requirements.txt."
     ) from exc
 
-DATASET_ROOT = Path("/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATASET_ROOT = PROJECT_ROOT / "indie_games_dataset"
 
 COLOR_BY_GROUP = {
     "indie": "#10b981",
@@ -1284,4 +1285,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

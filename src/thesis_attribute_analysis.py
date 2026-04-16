@@ -37,7 +37,8 @@ Pipeline = None
 StandardScaler = None
 
 # Delay importing the main pipeline module to avoid long silent startup before logs.
-DATASET_ROOT = Path("/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATASET_ROOT = PROJECT_ROOT / "indie_games_dataset"
 PipelineError = RuntimeError
 choose_device: Callable[[str], Any] | None = None
 collect_image_records: Callable[..., Any] | None = None

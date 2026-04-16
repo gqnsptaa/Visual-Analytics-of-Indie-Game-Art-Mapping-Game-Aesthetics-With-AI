@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLIP-based indie screenshot analysis pipeline (local-only dataset).
+"""CLIP-based indie screenshot analysis pipeline.
 
 This script mirrors the notebook workflow and adds production-friendly behavior:
 - Batched CLIP embedding extraction (GPU-aware)
@@ -9,8 +9,8 @@ This script mirrors the notebook workflow and adds production-friendly behavior:
 - Prompt-based style similarity scoring
 - JSON/CSV exports for web visualizations
 
-Dataset source is fixed to:
-/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset
+Default dataset source:
+<repo_root>/indie_games_dataset
 """
 
 from __future__ import annotations
@@ -43,8 +43,8 @@ except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
     ) from exc
 
 
-# Fixed local dataset root as requested.
-DATASET_ROOT = Path("/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATASET_ROOT = PROJECT_ROOT / "indie_games_dataset"
 
 DEFAULT_STYLE_PROMPTS = [
     "hand-painted illustration style indie game",
@@ -166,8 +166,8 @@ class StyleAdapterHead(torch.nn.Module):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run CLIP indie aesthetics analysis using a local dataset folder "
-            "(default set to your project dataset root)."
+            "Run CLIP indie aesthetics analysis using a dataset folder "
+            "(default set to the repository dataset root)."
         )
     )
     parser.add_argument(

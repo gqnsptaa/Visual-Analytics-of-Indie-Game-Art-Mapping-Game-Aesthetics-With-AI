@@ -27,13 +27,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-DATASET_ROOT = Path("/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATASET_ROOT = PROJECT_ROOT / "indie_games_dataset"
 TOKEN_ENDPOINT = "https://id.twitch.tv/oauth2/token"
 IGDB_BASE_URL = "https://api.igdb.com/v4"
 IMAGE_BASE_URL = "https://images.igdb.com/igdb/image/upload"
-DEFAULT_TOKEN_CACHE = Path("web/data/igdb_token_cache.json")
-DEFAULT_REPORT_PATH = Path("web/data/igdb_cover_fetch_report.json")
-DEFAULT_MAPPING_PATH = Path("src/igdb_game_mappings.csv")
+DEFAULT_TOKEN_CACHE = PROJECT_ROOT / "web" / "data" / "igdb_token_cache.json"
+DEFAULT_REPORT_PATH = PROJECT_ROOT / "web" / "data" / "igdb_cover_fetch_report.json"
+DEFAULT_MAPPING_PATH = PROJECT_ROOT / "src" / "igdb_game_mappings.csv"
 MAX_IGDB_SEARCH_RESULTS = 500
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 TOKEN_STOPWORDS = {

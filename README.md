@@ -12,7 +12,7 @@ This project implements the notebook workflow in a production-friendly form:
 ## 1. Install
 
 ```bash
-cd /Users/gqnsptaa/Desktop/Codex_Project
+cd /path/to/Codex_Project
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -26,12 +26,12 @@ pip install git+https://github.com/openai/CLIP.git
 
 The pipeline supports both OpenAI CLIP and OpenCLIP and auto-falls back.
 
-## 2. Dataset Structure (Local Only)
+## 2. Dataset Structure
 
 By default, the script reads screenshots from:
 
 ```text
-/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset/
+<repo_root>/indie_games_dataset/
   GameA/
     img1.jpg
     img2.png
@@ -194,14 +194,14 @@ To build a lightweight dataset for quick prompt testing:
 python src/create_demo_dataset.py \
   --per-group 100 \
   --images-per-game 1 \
-  --output-dataset-root /Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_demo_100x2
+  --output-dataset-root ./indie_games_dataset_demo_100x2
 ```
 
 Then run analysis on the demo set:
 
 ```bash
 python src/clip_indie_pipeline.py \
-  --dataset-root /Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_demo_100x2 \
+  --dataset-root ./indie_games_dataset_demo_100x2 \
   --output-dir web/data
 ```
 
@@ -209,7 +209,7 @@ python src/clip_indie_pipeline.py \
 
 ```bash
 python src/clip_indie_pipeline.py \
-  --dataset-root "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset" \
+  --dataset-root "./indie_games_dataset" \
   --output-dir "web/data" \
   --batch-size 32 \
   --device auto \
@@ -337,7 +337,7 @@ Train an adapter head on frozen OpenCLIP embeddings:
 ```bash
 python src/train_openclip_style_adapter.py \
   --train-csv path/to/style_labels.csv \
-  --image-root /Users/gqnsptaa/Desktop/Codex_Project \
+  --image-root . \
   --output-dir training_outputs/style_adapter \
   --model-name ViT-B/32 \
   --pretrained openai \

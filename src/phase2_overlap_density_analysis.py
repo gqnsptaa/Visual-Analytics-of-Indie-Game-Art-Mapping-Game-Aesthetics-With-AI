@@ -29,7 +29,8 @@ from plotly import graph_objects as go
 from plotly.subplots import make_subplots
 from scipy.stats import gaussian_kde
 
-DATASET_ROOT = Path("/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATASET_ROOT = PROJECT_ROOT / "indie_games_dataset"
 
 COLOR_BY_GROUP = {
     "indie": "#10b981",

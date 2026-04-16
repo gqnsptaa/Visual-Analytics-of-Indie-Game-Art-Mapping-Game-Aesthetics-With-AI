@@ -397,18 +397,31 @@ class AnalysisRunner:
                 "last_params": dict(self._last_params),
                 "output_tail": list(self._output_tail),
                 "dataset_modes": {
-                    "default": "full",
+                    "default": "auto",
                     "full_root": str(self.full_dataset_dir),
+                    "full_available": bool(self.full_dataset_dir.exists() and self.full_dataset_dir.is_dir()),
                     "demo_root": str(self.demo_dataset_dir),
                     "demo_available": bool(self.demo_dataset_dir.exists() and self.demo_dataset_dir.is_dir()),
                 },
             }
 
-    def _resolve_dataset_root(self, dataset_mode: str) -> Path:
+    def _resolve_dataset_root(self, dataset_mode: str) -> tuple[Path, str]:
         mode = str(dataset_mode or "full").strip().lower()
+        full_available = bool(self.full_dataset_dir.exists() and self.full_dataset_dir.is_dir())
+        demo_available = bool(self.demo_dataset_dir.exists() and self.demo_dataset_dir.is_dir())
+
         if mode == "demo":
-            return self.demo_dataset_dir
-        return self.full_dataset_dir
+            if demo_available:
+                return self.demo_dataset_dir, "demo"
+            if full_available:
+                return self.full_dataset_dir, "full_fallback"
+            return self.demo_dataset_dir, "demo_missing"
+
+        if full_available:
+            return self.full_dataset_dir, "full"
+        if demo_available:
+            return self.demo_dataset_dir, "demo_fallback"
+        return self.full_dataset_dir, "full_missing"
 
     def _append_output(self, line: str) -> None:
         with self._lock:
@@ -422,8 +435,8 @@ class AnalysisRunner:
             self._last_finished_at = utc_now_iso()
 
     def _run_pipeline(self, run_params: dict[str, Any]) -> None:
-        dataset_mode = str(run_params.get("dataset_mode", "full"))
-        dataset_root = self._resolve_dataset_root(dataset_mode)
+        requested_mode = str(run_params.get("dataset_mode", "full"))
+        dataset_root, effective_mode = self._resolve_dataset_root(requested_mode)
         cmd = [
             sys.executable,
             str(self.pipeline_path),
@@ -459,8 +472,13 @@ class AnalysisRunner:
         if DEFAULT_PROMPT_FOCUS_FILE.exists():
             cmd.extend(["--prompt-focus-file", str(DEFAULT_PROMPT_FOCUS_FILE)])
             self._append_output(f"[info] prompt focus file: {DEFAULT_PROMPT_FOCUS_FILE}\n")
-        self._append_output(f"[info] dataset mode: {dataset_mode}\n")
+        self._append_output(f"[info] requested dataset mode: {requested_mode}\n")
+        self._append_output(f"[info] effective dataset mode: {effective_mode}\n")
         self._append_output(f"[info] dataset root: {dataset_root}\n")
+        if effective_mode != requested_mode:
+            self._append_output(
+                f"[warn] Requested dataset mode '{requested_mode}' is unavailable. Using '{effective_mode}' instead.\n"
+            )
 
         try:
             process = subprocess.Popen(
@@ -537,18 +555,31 @@ class Phase3Runner:
                 "last_params": dict(self._last_params),
                 "output_tail": list(self._output_tail),
                 "dataset_modes": {
-                    "default": "full",
+                    "default": "auto",
                     "full_root": str(self.full_dataset_dir),
+                    "full_available": bool(self.full_dataset_dir.exists() and self.full_dataset_dir.is_dir()),
                     "demo_root": str(self.demo_dataset_dir),
                     "demo_available": bool(self.demo_dataset_dir.exists() and self.demo_dataset_dir.is_dir()),
                 },
             }
 
-    def _resolve_dataset_root(self, dataset_mode: str) -> Path:
+    def _resolve_dataset_root(self, dataset_mode: str) -> tuple[Path, str]:
         mode = str(dataset_mode or "full").strip().lower()
+        full_available = bool(self.full_dataset_dir.exists() and self.full_dataset_dir.is_dir())
+        demo_available = bool(self.demo_dataset_dir.exists() and self.demo_dataset_dir.is_dir())
+
         if mode == "demo":
-            return self.demo_dataset_dir
-        return self.full_dataset_dir
+            if demo_available:
+                return self.demo_dataset_dir, "demo"
+            if full_available:
+                return self.full_dataset_dir, "full_fallback"
+            return self.demo_dataset_dir, "demo_missing"
+
+        if full_available:
+            return self.full_dataset_dir, "full"
+        if demo_available:
+            return self.demo_dataset_dir, "demo_fallback"
+        return self.full_dataset_dir, "full_missing"
 
     def _append_output(self, line: str) -> None:
         with self._lock:
@@ -562,8 +593,8 @@ class Phase3Runner:
             self._last_finished_at = utc_now_iso()
 
     def _run_phase3(self, run_params: dict[str, Any]) -> None:
-        dataset_mode = str(run_params.get("dataset_mode", "full"))
-        dataset_root = self._resolve_dataset_root(dataset_mode)
+        requested_mode = str(run_params.get("dataset_mode", "full"))
+        dataset_root, effective_mode = self._resolve_dataset_root(requested_mode)
         cmd = [
             sys.executable,
             str(self.phase3_script_path),
@@ -589,8 +620,13 @@ class Phase3Runner:
             str(run_params["max_pairs_per_bucket"]),
         ]
 
-        self._append_output(f"[info] dataset mode: {dataset_mode}\n")
+        self._append_output(f"[info] requested dataset mode: {requested_mode}\n")
+        self._append_output(f"[info] effective dataset mode: {effective_mode}\n")
         self._append_output(f"[info] dataset root: {dataset_root}\n")
+        if effective_mode != requested_mode:
+            self._append_output(
+                f"[warn] Requested dataset mode '{requested_mode}' is unavailable. Using '{effective_mode}' instead.\n"
+            )
         self._append_output(f"[info] phase3 output dir: {self.output_dir}\n")
 
         try:
