@@ -1,0 +1,327 @@
+{
+  "created_at": "2026-03-19T13:43:05.270722",
+  "reason": "balance_indie_to_403_against_aaa_403",
+  "selection_method": "alphabetically_last_63_indie_labels_from_current_analysis_results",
+  "selected_count": 63,
+  "moved_count": 63,
+  "missing_count": 0,
+  "missing_labels": [],
+  "holdout_dir": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305",
+  "moved": [
+    {
+      "label": "The Pathless",
+      "from": "indie_games_dataset/The Pathless",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/The Pathless"
+    },
+    {
+      "label": "The Pedestrian",
+      "from": "indie_games_dataset/The Pedestrian",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/The Pedestrian"
+    },
+    {
+      "label": "The Red Strings Club",
+      "from": "indie_games_dataset/The Red Strings Club",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/The Red Strings Club"
+    },
+    {
+      "label": "The Riftbreaker",
+      "from": "indie_games_dataset/The Riftbreaker",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/The Riftbreaker"
+    },
+    {
+      "label": "The Sexy Brutale",
+      "from": "indie_games_dataset/The Sexy Brutale",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/The Sexy Brutale"
+    },
+    {
+      "label": "The Signal State",
+      "from": "indie_games_dataset/The Signal State",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/The Signal State"
+    },
+    {
+      "label": "The Stanley Parable",
+      "from": "indie_games_dataset/The Stanley Parable",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/The Stanley Parable"
+    },
+    {
+      "label": "The Swapper",
+      "from": "indie_games_dataset/The Swapper",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/The Swapper"
+    },
+    {
+      "label": "The Swords of Ditto",
+      "from": "indie_games_dataset/The Swords of Ditto",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/The Swords of Ditto"
+    },
+    {
+      "label": "The Touryst",
+      "from": "indie_games_dataset/The Touryst",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/The Touryst"
+    },
+    {
+      "label": "The Unfinished Swan",
+      "from": "indie_games_dataset/The Unfinished Swan",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/The Unfinished Swan"
+    },
+    {
+      "label": "The Wolf Among Us 2",
+      "from": "indie_games_dataset/The Wolf Among Us 2",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/The Wolf Among Us 2"
+    },
+    {
+      "label": "Thirsty Suitors",
+      "from": "indie_games_dataset/Thirsty Suitors",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Thirsty Suitors"
+    },
+    {
+      "label": "This War of Mine",
+      "from": "indie_games_dataset/This War of Mine",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/This War of Mine"
+    },
+    {
+      "label": "Thumper",
+      "from": "indie_games_dataset/Thumper",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Thumper"
+    },
+    {
+      "label": "Tinykin",
+      "from": "indie_games_dataset/Tinykin",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Tinykin"
+    },
+    {
+      "label": "Totally Accurate Battle Simulator",
+      "from": "indie_games_dataset/Totally Accurate Battle Simulator",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Totally Accurate Battle Simulator"
+    },
+    {
+      "label": "Tower of Guns",
+      "from": "indie_games_dataset/Tower of Guns",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Tower of Guns"
+    },
+    {
+      "label": "Towerfall Ascension",
+      "from": "indie_games_dataset/Towerfall Ascension",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Towerfall Ascension"
+    },
+    {
+      "label": "Transformice",
+      "from": "indie_games_dataset/Transformice",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Transformice"
+    },
+    {
+      "label": "Tricky Towers",
+      "from": "indie_games_dataset/Tricky Towers",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Tricky Towers"
+    },
+    {
+      "label": "Trine 2",
+      "from": "indie_games_dataset/Trine 2",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Trine 2"
+    },
+    {
+      "label": "Twelve Minutes",
+      "from": "indie_games_dataset/Twelve Minutes",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Twelve Minutes"
+    },
+    {
+      "label": "Ultimate Chicken Horse",
+      "from": "indie_games_dataset/Ultimate Chicken Horse",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Ultimate Chicken Horse"
+    },
+    {
+      "label": "Undertale",
+      "from": "indie_games_dataset/Undertale",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Undertale"
+    },
+    {
+      "label": "Unrailed",
+      "from": "indie_games_dataset/Unrailed",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Unrailed"
+    },
+    {
+      "label": "Unsighted",
+      "from": "indie_games_dataset/Unsighted",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Unsighted"
+    },
+    {
+      "label": "Utopia The Creation of a Nation",
+      "from": "indie_games_dataset/Utopia The Creation of a Nation",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Utopia The Creation of a Nation"
+    },
+    {
+      "label": "V Rising",
+      "from": "indie_games_dataset/V Rising",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/V Rising"
+    },
+    {
+      "label": "VA-11 Hall-A: Cyberpunk Bartender Action",
+      "from": "indie_games_dataset/VA-11 Hall-A: Cyberpunk Bartender Action",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/VA-11 Hall-A: Cyberpunk Bartender Action"
+    },
+    {
+      "label": "Vampire Hunter D",
+      "from": "indie_games_dataset/Vampire Hunter D",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Vampire Hunter D"
+    },
+    {
+      "label": "Venba",
+      "from": "indie_games_dataset/Venba",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Venba"
+    },
+    {
+      "label": "Vendetta Online",
+      "from": "indie_games_dataset/Vendetta Online",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Vendetta Online"
+    },
+    {
+      "label": "Void Bastards",
+      "from": "indie_games_dataset/Void Bastards",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Void Bastards"
+    },
+    {
+      "label": "Voidigo",
+      "from": "indie_games_dataset/Voidigo",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Voidigo"
+    },
+    {
+      "label": "WCW nWo Revenge",
+      "from": "indie_games_dataset/WCW nWo Revenge",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/WCW nWo Revenge"
+    },
+    {
+      "label": "WWF No Mercy",
+      "from": "indie_games_dataset/WWF No Mercy",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/WWF No Mercy"
+    },
+    {
+      "label": "WWF WrestleMania 2000",
+      "from": "indie_games_dataset/WWF WrestleMania 2000",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/WWF WrestleMania 2000"
+    },
+    {
+      "label": "Wakfu",
+      "from": "indie_games_dataset/Wakfu",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Wakfu"
+    },
+    {
+      "label": "Wakfu The Brotherhood",
+      "from": "indie_games_dataset/Wakfu The Brotherhood",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Wakfu The Brotherhood"
+    },
+    {
+      "label": "Wandersong",
+      "from": "indie_games_dataset/Wandersong",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Wandersong"
+    },
+    {
+      "label": "Warhammer 40000 Mechanicus",
+      "from": "indie_games_dataset/Warhammer 40000 Mechanicus",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Warhammer 40000 Mechanicus"
+    },
+    {
+      "label": "Waven",
+      "from": "indie_games_dataset/Waven",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Waven"
+    },
+    {
+      "label": "Webbed",
+      "from": "indie_games_dataset/Webbed",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Webbed"
+    },
+    {
+      "label": "Weird West",
+      "from": "indie_games_dataset/Weird West",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Weird West"
+    },
+    {
+      "label": "Welcome to Elk",
+      "from": "indie_games_dataset/Welcome to Elk",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Welcome to Elk"
+    },
+    {
+      "label": "What Remains of Edith Finch",
+      "from": "indie_games_dataset/What Remains of Edith Finch",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/What Remains of Edith Finch"
+    },
+    {
+      "label": "Whispering Willows",
+      "from": "indie_games_dataset/Whispering Willows",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Whispering Willows"
+    },
+    {
+      "label": "Wildfrost",
+      "from": "indie_games_dataset/Wildfrost",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Wildfrost"
+    },
+    {
+      "label": "Windjammers 2",
+      "from": "indie_games_dataset/Windjammers 2",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Windjammers 2"
+    },
+    {
+      "label": "Wizard of Legend",
+      "from": "indie_games_dataset/Wizard of Legend",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Wizard of Legend"
+    },
+    {
+      "label": "Wizards & Warriors",
+      "from": "indie_games_dataset/Wizards & Warriors",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Wizards & Warriors"
+    },
+    {
+      "label": "World of Goo",
+      "from": "indie_games_dataset/World of Goo",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/World of Goo"
+    },
+    {
+      "label": "Wytchwood",
+      "from": "indie_games_dataset/Wytchwood",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Wytchwood"
+    },
+    {
+      "label": "Xenotilt Hostile Pinball Action",
+      "from": "indie_games_dataset/Xenotilt Hostile Pinball Action",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Xenotilt Hostile Pinball Action"
+    },
+    {
+      "label": "Yes, Your Grace",
+      "from": "indie_games_dataset/Yes, Your Grace",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Yes, Your Grace"
+    },
+    {
+      "label": "Ynglet",
+      "from": "indie_games_dataset/Ynglet",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Ynglet"
+    },
+    {
+      "label": "Yoku's Island Express",
+      "from": "indie_games_dataset/Yoku's Island Express",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Yoku's Island Express"
+    },
+    {
+      "label": "Zeno Clash",
+      "from": "indie_games_dataset/Zeno Clash",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Zeno Clash"
+    },
+    {
+      "label": "Zeno Clash II",
+      "from": "indie_games_dataset/Zeno Clash II",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Zeno Clash II"
+    },
+    {
+      "label": "ZeroRanger",
+      "from": "indie_games_dataset/ZeroRanger",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/ZeroRanger"
+    },
+    {
+      "label": "Ziggurat 2",
+      "from": "indie_games_dataset/Ziggurat 2",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/Ziggurat 2"
+    },
+    {
+      "label": "ZombieZoid Zenith",
+      "from": "indie_games_dataset/ZombieZoid Zenith",
+      "to": "indie_games_dataset_holdout/indie_balance_holdout_20260319_134305/ZombieZoid Zenith"
+    }
+  ]
+}

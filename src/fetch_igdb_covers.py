@@ -34,6 +34,7 @@ IMAGE_BASE_URL = "https://images.igdb.com/igdb/image/upload"
 DEFAULT_TOKEN_CACHE = Path("web/data/igdb_token_cache.json")
 DEFAULT_REPORT_PATH = Path("web/data/igdb_cover_fetch_report.json")
 DEFAULT_MAPPING_PATH = Path("src/igdb_game_mappings.csv")
+MAX_IGDB_SEARCH_RESULTS = 500
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 TOKEN_STOPWORDS = {
     "the",
@@ -341,13 +342,13 @@ def parse_args() -> argparse.Namespace:
         "--search-company",
         type=str,
         default="",
-        help="Optional company name filter for search mode (example: Rockstar, Ubisoft).",
+        help="Optional studio filter(s) for search mode (comma/semicolon/newline separated).",
     )
     parser.add_argument(
         "--search-limit",
         type=int,
         default=20,
-        help="Max results for --search-query mode.",
+        help=f"Max results for --search-query mode (1-{MAX_IGDB_SEARCH_RESULTS}).",
     )
     return parser.parse_args()
 
@@ -775,6 +776,39 @@ def sanitize_igdb_search_text(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").replace("\\", " ").replace('"', " ").strip())
 
 
+def parse_company_filters(raw_value: str) -> list[str]:
+    """Split a company search string into unique studio filters.
+
+    Supports comma, semicolon, or newline delimiters so the UI can submit:
+    "Rockstar, Ubisoft, CD Projekt".
+    """
+    normalized = str(raw_value or "").replace("\r\n", "\n").replace("\r", "\n")
+    tokens = re.split(r"[,\n;]+", normalized)
+    filters: list[str] = []
+    for token in tokens:
+        safe = sanitize_igdb_search_text(token)
+        if len(safe) < 2:
+            continue
+        if safe not in filters:
+            filters.append(safe)
+    return filters
+
+
+def company_name_match_score(query_name: str, candidate_name: str) -> float:
+    """Score how well an IGDB company name matches the requested studio string."""
+    query_norm = normalize_name(query_name)
+    candidate_norm = normalize_name(candidate_name)
+    if not query_norm or not candidate_norm:
+        return 0.0
+
+    query_tokens = to_tokens(query_norm)
+    candidate_tokens = to_tokens(candidate_norm)
+    overlap = token_overlap_ratio(query_tokens, candidate_tokens) if query_tokens else 0.0
+    seq_ratio = difflib.SequenceMatcher(None, query_norm, candidate_norm).ratio()
+    contains_bonus = 0.15 if (query_norm in candidate_norm or candidate_norm in query_norm) else 0.0
+    return min(1.0, 0.6 * overlap + 0.35 * seq_ratio + contains_bonus)
+
+
 def sort_game_rows_for_search(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     def sort_key(row: dict[str, Any]) -> tuple[int, int, float, int]:
         category_raw = row.get("category")
@@ -874,7 +908,7 @@ def search_games_by_name_api(
     safe_query = sanitize_igdb_search_text(query_name)
     if not safe_query:
         return []
-    bounded_limit = min(50, max(1, int(limit)))
+    bounded_limit = min(MAX_IGDB_SEARCH_RESULTS, max(1, int(limit)))
     escaped_query = safe_query.replace("\\", "\\\\")
     base_fields = "fields id,name,first_release_date,total_rating,total_rating_count,category,cover.image_id,genres;"
 
@@ -962,7 +996,7 @@ def search_games_by_company_api(
     safe_company = sanitize_igdb_search_text(company_name)
     if not safe_company:
         return []
-    bounded_limit = min(50, max(1, int(limit)))
+    bounded_limit = min(MAX_IGDB_SEARCH_RESULTS, max(1, int(limit)))
 
     company_terms: list[str] = []
     tokens = [token for token in re.split(r"\s+", safe_company) if token]
@@ -983,43 +1017,70 @@ def search_games_by_company_api(
             if rows:
                 company_rows.extend(rows)
 
-    company_ids: list[int] = []
+    scored_companies: list[tuple[float, int]] = []
+    scored_by_id: dict[int, float] = {}
     for row in company_rows:
         try:
             company_id = int(row.get("id") or 0)
         except (TypeError, ValueError):
             continue
-        if company_id > 0 and company_id not in company_ids:
-            company_ids.append(company_id)
-        if len(company_ids) >= 25:
-            break
+        if company_id <= 0:
+            continue
+        company_label = str(row.get("name") or "").strip()
+        score = company_name_match_score(safe_company, company_label)
+        prev = scored_by_id.get(company_id)
+        if prev is None or score > prev:
+            scored_by_id[company_id] = score
+
+    for company_id, score in scored_by_id.items():
+        scored_companies.append((score, company_id))
+    scored_companies.sort(key=lambda item: item[0], reverse=True)
+
+    strong_company_ids = [company_id for score, company_id in scored_companies if score >= 0.55]
+    if strong_company_ids:
+        company_ids = strong_company_ids[:12]
+    else:
+        # Fallback if IGDB names are noisy: keep top-scoring candidates only.
+        company_ids = [company_id for _, company_id in scored_companies[:6]]
+
     if not company_ids:
         return []
+    if len(company_ids) > 25:
+        company_ids = company_ids[:25]
 
     company_id_csv = ",".join(str(value) for value in company_ids)
     discovered_game_ids: list[int] = []
     per_page = 500
     max_rows = min(5000, max(500, bounded_limit * 40))
-    offset = 0
-    while offset < max_rows:
-        query = (
-            "fields game,company,publisher,developer;"
-            f" where game != null & company = ({company_id_csv});"
-            f" limit {per_page}; offset {offset};"
-        )
-        rows = igdb_post("involved_companies", query, headers, timeout, max_retries, rate_limiter)
-        if not rows:
-            break
-        for row in rows:
-            try:
-                game_id = int(row.get("game") or 0)
-            except (TypeError, ValueError):
-                continue
-            if game_id > 0 and game_id not in discovered_game_ids:
-                discovered_game_ids.append(game_id)
-        if len(rows) < per_page:
-            break
-        offset += per_page
+
+    def collect_discovered_ids(require_primary_role: bool) -> list[int]:
+        game_ids: list[int] = []
+        offset = 0
+        role_clause = " & (developer = true | publisher = true)" if require_primary_role else ""
+        while offset < max_rows:
+            query = (
+                "fields game,company,publisher,developer;"
+                f" where game != null & company = ({company_id_csv}){role_clause};"
+                f" limit {per_page}; offset {offset};"
+            )
+            rows = igdb_post("involved_companies", query, headers, timeout, max_retries, rate_limiter)
+            if not rows:
+                break
+            for row in rows:
+                try:
+                    game_id = int(row.get("game") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if game_id > 0 and game_id not in game_ids:
+                    game_ids.append(game_id)
+            if len(rows) < per_page:
+                break
+            offset += per_page
+        return game_ids
+
+    discovered_game_ids = collect_discovered_ids(require_primary_role=True)
+    if not discovered_game_ids:
+        discovered_game_ids = collect_discovered_ids(require_primary_role=False)
 
     if not discovered_game_ids:
         return []
@@ -1064,9 +1125,9 @@ def search_games_api(
     rate_limiter: RateLimiter,
     company_name: str = "",
 ) -> list[dict[str, Any]]:
-    bounded_limit = min(50, max(1, int(limit)))
+    bounded_limit = min(MAX_IGDB_SEARCH_RESULTS, max(1, int(limit)))
     safe_query = sanitize_igdb_search_text(query_name)
-    safe_company = sanitize_igdb_search_text(company_name)
+    company_filters = parse_company_filters(company_name)
 
     by_name_rows: list[dict[str, Any]] = []
     by_company_rows: list[dict[str, Any]] = []
@@ -1079,20 +1140,57 @@ def search_games_api(
             max_retries=max_retries,
             rate_limiter=rate_limiter,
         )
-    if safe_company:
-        by_company_rows = search_games_by_company_api(
-            company_name=safe_company,
-            limit=bounded_limit,
-            headers=headers,
-            timeout=timeout,
-            max_retries=max_retries,
-            rate_limiter=rate_limiter,
-            query_name=safe_query,
-        )
+    if company_filters:
+        per_company_rows: list[list[dict[str, Any]]] = []
+        # Allow larger retrieval windows for company searches, including single-company >100 requests.
+        if len(company_filters) == 1:
+            per_company_limit = bounded_limit
+        else:
+            per_company_limit = min(
+                bounded_limit,
+                max(20, (bounded_limit + len(company_filters) - 1) // len(company_filters) + 12),
+            )
+        for company_filter in company_filters:
+            rows = search_games_by_company_api(
+                company_name=company_filter,
+                limit=per_company_limit,
+                headers=headers,
+                timeout=timeout,
+                max_retries=max_retries,
+                rate_limiter=rate_limiter,
+                query_name=safe_query,
+            )
+            if rows:
+                per_company_rows.append(rows)
 
-    if safe_company and not safe_query:
+        # Balance output across studios to avoid one large publisher dominating the result list.
+        seen_ids: set[int] = set()
+        by_company_rows = []
+        round_idx = 0
+        while len(by_company_rows) < bounded_limit:
+            added_this_round = 0
+            for rows in per_company_rows:
+                if round_idx >= len(rows):
+                    continue
+                row = rows[round_idx]
+                try:
+                    row_id = int(row.get("id") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if row_id <= 0 or row_id in seen_ids:
+                    continue
+                seen_ids.add(row_id)
+                by_company_rows.append(row)
+                added_this_round += 1
+                if len(by_company_rows) >= bounded_limit:
+                    break
+            if added_this_round == 0:
+                break
+            round_idx += 1
+
+    if company_filters and not safe_query:
         return by_company_rows[:bounded_limit]
-    if safe_query and not safe_company:
+    if safe_query and not company_filters:
         return by_name_rows[:bounded_limit]
 
     # If both filters are supplied, prefer company-constrained matches and then top up with title-only matches.
@@ -1767,7 +1865,7 @@ def download_cover(
         status, payload, headers = request_bytes(
             url=url,
             method="GET",
-            headers={"User-Agent": "Codex-IGDB-Cover-Fetcher/1.0"},
+            headers={"User-Agent": "IGDB-Cover-Fetcher/1.0"},
             body=None,
             timeout=timeout,
             max_retries=max_retries,
@@ -1790,10 +1888,11 @@ def download_cover(
 
 
 def run_search_mode(args: argparse.Namespace) -> int:
-    if args.search_limit < 1 or args.search_limit > 100:
-        raise FetchError("search-limit must be between 1 and 100.")
+    if args.search_limit < 1 or args.search_limit > MAX_IGDB_SEARCH_RESULTS:
+        raise FetchError(f"search-limit must be between 1 and {MAX_IGDB_SEARCH_RESULTS}.")
     query = str(args.search_query or "").strip()
     company = str(args.search_company or "").strip()
+    company_filters = parse_company_filters(company)
     if not query and not company:
         raise FetchError("Provide search-query or search-company for search mode.")
 
@@ -1837,7 +1936,13 @@ def run_search_mode(args: argparse.Namespace) -> int:
         )
     print(
         json.dumps(
-            {"query": query, "company": company, "count": len(results), "results": results},
+            {
+                "query": query,
+                "company": company,
+                "companies": company_filters,
+                "count": len(results),
+                "results": results,
+            },
             ensure_ascii=False,
         ),
         flush=True,

@@ -4,6 +4,8 @@
 Serves the `web/` app and provides:
 - GET /api/status
 - POST /api/run-analysis
+- GET /api/phase3-status
+- POST /api/run-phase3
 - GET /api/igdb-status
 - GET /api/igdb-search-games?q=...&company=...
 - GET /api/game-folders
@@ -14,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import threading
@@ -29,8 +32,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = PROJECT_ROOT / "web"
 PIPELINE_PATH = PROJECT_ROOT / "src" / "clip_indie_pipeline.py"
 IGDB_FETCH_PATH = PROJECT_ROOT / "src" / "fetch_igdb_covers.py"
+PHASE3_PATH = PROJECT_ROOT / "src" / "phase3_advanced_separability_analysis.py"
 OUTPUT_DIR = WEB_DIR / "data"
+PHASE3_OUTPUT_DIR = WEB_DIR / "data" / "phase3_advanced"
 DATASET_DIR = PROJECT_ROOT / "indie_games_dataset"
+DEMO_DATASET_DIR = PROJECT_ROOT / "indie_games_dataset_demo_100x2"
 DEFAULT_STYLE_ADAPTER_CKPT = PROJECT_ROOT / "training_outputs" / "style_adapter" / "best_style_adapter.pt"
 DEFAULT_STYLE_PROMPTS_FILE = PROJECT_ROOT / "src" / "style_prompts_graphic_design_expanded.txt"
 DEFAULT_PROMPT_FOCUS_FILE = PROJECT_ROOT / "src" / "style_prompts_graphic_design_focus.txt"
@@ -38,6 +44,7 @@ DEFAULT_IGDB_MAPPING_CSV = PROJECT_ROOT / "src" / "igdb_game_mappings.csv"
 DEFAULT_IGDB_REPORT_JSON = WEB_DIR / "data" / "igdb_cover_fetch_report.json"
 DEFAULT_GAME_GROUPS_CSV = PROJECT_ROOT / "src" / "game_groups.csv"
 MAX_REQUEST_BYTES = 64 * 1024
+MAX_IGDB_SEARCH_RESULTS = 500
 
 
 def utc_now_iso() -> str:
@@ -85,6 +92,65 @@ def parse_run_params(payload: dict[str, Any] | None) -> dict[str, Any]:
         "seed": as_int("seed", default=42, min_value=0, max_value=2_147_483_647),
         "device": as_choice("device", default="auto", choices={"auto", "cpu", "cuda", "mps"}),
         "clip_backend": as_choice("clip_backend", default="auto", choices={"auto", "openai", "open_clip"}),
+        "dataset_mode": as_choice("dataset_mode", default="full", choices={"full", "demo"}),
+    }
+
+    model_name = str(data.get("model_name", "ViT-B/32")).strip()
+    if len(model_name) == 0 or len(model_name) > 128:
+        raise ValueError("'model_name' must be a non-empty string shorter than 129 characters.")
+    normalized["model_name"] = model_name
+    return normalized
+
+
+def parse_phase3_run_params(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Validate and normalize phase-3 analysis parameters from API payload."""
+    data = payload or {}
+    if not isinstance(data, dict):
+        raise ValueError("Request payload must be a JSON object.")
+
+    def as_int(key: str, default: int, min_value: int, max_value: int) -> int:
+        value = data.get(key, default)
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"'{key}' must be an integer.") from None
+        if parsed < min_value or parsed > max_value:
+            raise ValueError(f"'{key}' must be between {min_value} and {max_value}.")
+        return parsed
+
+    def as_choice(key: str, default: str, choices: set[str]) -> str:
+        value = str(data.get(key, default)).strip()
+        if value not in choices:
+            raise ValueError(f"'{key}' must be one of: {', '.join(sorted(choices))}.")
+        return value
+
+    def as_csv_int_list(key: str, default: str) -> str:
+        value = str(data.get(key, default)).strip()
+        if not value:
+            raise ValueError(f"'{key}' must be a non-empty comma-separated integer list.")
+        parts = [token.strip() for token in value.split(",") if token.strip()]
+        if not parts:
+            raise ValueError(f"'{key}' must be a non-empty comma-separated integer list.")
+        normalized_parts: list[str] = []
+        for token in parts:
+            try:
+                parsed = int(token)
+            except ValueError:
+                raise ValueError(f"'{key}' must contain integers only.") from None
+            if parsed <= 0:
+                raise ValueError(f"'{key}' values must be > 0.")
+            normalized_parts.append(str(parsed))
+        return ",".join(normalized_parts)
+
+    normalized = {
+        "batch_size": as_int("batch_size", default=32, min_value=1, max_value=512),
+        "sample_size": as_int("sample_size", default=0, min_value=0, max_value=20000),
+        "max_pairs_per_bucket": as_int("max_pairs_per_bucket", default=200000, min_value=100, max_value=2_000_000),
+        "device": as_choice("device", default="auto", choices={"auto", "cpu", "cuda", "mps"}),
+        "clip_backend": as_choice("clip_backend", default="open_clip", choices={"auto", "openai", "open_clip"}),
+        "dataset_mode": as_choice("dataset_mode", default="full", choices={"full", "demo"}),
+        "pca_levels": as_csv_int_list("pca_levels", default="2,5,10,25,50,100,200"),
+        "ari_seeds": as_csv_int_list("ari_seeds", default="42,43,44"),
     }
 
     model_name = str(data.get("model_name", "ViT-B/32")).strip()
@@ -263,25 +329,34 @@ def parse_igdb_search_params(query: dict[str, list[str]]) -> tuple[str, int, str
         raise ValueError("'q' must be shorter than 121 characters.")
     if raw_company and len(raw_company) < 2:
         raise ValueError("'company' must be at least 2 characters when provided.")
-    if len(raw_company) > 120:
-        raise ValueError("'company' must be shorter than 121 characters.")
+    if len(raw_company) > 2000:
+        raise ValueError("'company' must be shorter than 2001 characters.")
     raw_limit = (query.get("limit", ["20"])[0] or "20").strip()
     try:
         limit = int(raw_limit)
     except ValueError:
         raise ValueError("'limit' must be an integer.") from None
-    if limit < 1 or limit > 50:
-        raise ValueError("'limit' must be between 1 and 50.")
+    if limit < 1 or limit > MAX_IGDB_SEARCH_RESULTS:
+        raise ValueError(f"'limit' must be between 1 and {MAX_IGDB_SEARCH_RESULTS}.")
     return raw_q, limit, raw_company
 
 
 class AnalysisRunner:
     """Stateful runner for a single in-flight analysis process."""
 
-    def __init__(self, project_root: Path, pipeline_path: Path, output_dir: Path) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        pipeline_path: Path,
+        output_dir: Path,
+        full_dataset_dir: Path,
+        demo_dataset_dir: Path,
+    ) -> None:
         self.project_root = project_root
         self.pipeline_path = pipeline_path
         self.output_dir = output_dir
+        self.full_dataset_dir = full_dataset_dir
+        self.demo_dataset_dir = demo_dataset_dir
 
         self._lock = threading.Lock()
         self._running = False
@@ -321,7 +396,19 @@ class AnalysisRunner:
                 "last_finished_at": self._last_finished_at,
                 "last_params": dict(self._last_params),
                 "output_tail": list(self._output_tail),
+                "dataset_modes": {
+                    "default": "full",
+                    "full_root": str(self.full_dataset_dir),
+                    "demo_root": str(self.demo_dataset_dir),
+                    "demo_available": bool(self.demo_dataset_dir.exists() and self.demo_dataset_dir.is_dir()),
+                },
             }
+
+    def _resolve_dataset_root(self, dataset_mode: str) -> Path:
+        mode = str(dataset_mode or "full").strip().lower()
+        if mode == "demo":
+            return self.demo_dataset_dir
+        return self.full_dataset_dir
 
     def _append_output(self, line: str) -> None:
         with self._lock:
@@ -335,9 +422,13 @@ class AnalysisRunner:
             self._last_finished_at = utc_now_iso()
 
     def _run_pipeline(self, run_params: dict[str, Any]) -> None:
+        dataset_mode = str(run_params.get("dataset_mode", "full"))
+        dataset_root = self._resolve_dataset_root(dataset_mode)
         cmd = [
             sys.executable,
             str(self.pipeline_path),
+            "--dataset-root",
+            str(dataset_root),
             "--output-dir",
             str(self.output_dir),
             "--tsne-perplexity",
@@ -368,6 +459,139 @@ class AnalysisRunner:
         if DEFAULT_PROMPT_FOCUS_FILE.exists():
             cmd.extend(["--prompt-focus-file", str(DEFAULT_PROMPT_FOCUS_FILE)])
             self._append_output(f"[info] prompt focus file: {DEFAULT_PROMPT_FOCUS_FILE}\n")
+        self._append_output(f"[info] dataset mode: {dataset_mode}\n")
+        self._append_output(f"[info] dataset root: {dataset_root}\n")
+
+        try:
+            process = subprocess.Popen(
+                cmd,
+                cwd=str(self.project_root),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+
+            assert process.stdout is not None
+            for line in process.stdout:
+                self._append_output(line)
+
+            exit_code = process.wait()
+            self._finish(exit_code=exit_code, error=None)
+        except Exception as exc:  # pragma: no cover - runtime guard
+            self._finish(exit_code=1, error=str(exc))
+
+
+class Phase3Runner:
+    """Stateful runner for a single in-flight phase-3 analysis process."""
+
+    def __init__(
+        self,
+        project_root: Path,
+        phase3_script_path: Path,
+        output_dir: Path,
+        full_dataset_dir: Path,
+        demo_dataset_dir: Path,
+    ) -> None:
+        self.project_root = project_root
+        self.phase3_script_path = phase3_script_path
+        self.output_dir = output_dir
+        self.full_dataset_dir = full_dataset_dir
+        self.demo_dataset_dir = demo_dataset_dir
+
+        self._lock = threading.Lock()
+        self._running = False
+        self._thread: threading.Thread | None = None
+        self._last_exit_code: int | None = None
+        self._last_error: str | None = None
+        self._last_started_at: str | None = None
+        self._last_finished_at: str | None = None
+        self._output_tail: deque[str] = deque(maxlen=260)
+        self._last_params: dict[str, Any] = {}
+
+    def start(self, run_params: dict[str, Any]) -> tuple[bool, str]:
+        with self._lock:
+            if self._running:
+                return False, "Phase-3 analysis is already running."
+
+            self._running = True
+            self._last_exit_code = None
+            self._last_error = None
+            self._last_started_at = utc_now_iso()
+            self._last_finished_at = None
+            self._last_params = dict(run_params)
+            self._output_tail.clear()
+
+            self._thread = threading.Thread(target=self._run_phase3, args=(dict(run_params),), daemon=True)
+            self._thread.start()
+            return True, "Phase-3 analysis started."
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "running": self._running,
+                "last_exit_code": self._last_exit_code,
+                "last_error": self._last_error,
+                "last_started_at": self._last_started_at,
+                "last_finished_at": self._last_finished_at,
+                "last_params": dict(self._last_params),
+                "output_tail": list(self._output_tail),
+                "dataset_modes": {
+                    "default": "full",
+                    "full_root": str(self.full_dataset_dir),
+                    "demo_root": str(self.demo_dataset_dir),
+                    "demo_available": bool(self.demo_dataset_dir.exists() and self.demo_dataset_dir.is_dir()),
+                },
+            }
+
+    def _resolve_dataset_root(self, dataset_mode: str) -> Path:
+        mode = str(dataset_mode or "full").strip().lower()
+        if mode == "demo":
+            return self.demo_dataset_dir
+        return self.full_dataset_dir
+
+    def _append_output(self, line: str) -> None:
+        with self._lock:
+            self._output_tail.append(line.rstrip("\n"))
+
+    def _finish(self, exit_code: int, error: str | None) -> None:
+        with self._lock:
+            self._running = False
+            self._last_exit_code = exit_code
+            self._last_error = error
+            self._last_finished_at = utc_now_iso()
+
+    def _run_phase3(self, run_params: dict[str, Any]) -> None:
+        dataset_mode = str(run_params.get("dataset_mode", "full"))
+        dataset_root = self._resolve_dataset_root(dataset_mode)
+        cmd = [
+            sys.executable,
+            str(self.phase3_script_path),
+            "--dataset-root",
+            str(dataset_root),
+            "--output-dir",
+            str(self.output_dir),
+            "--sample-size",
+            str(run_params["sample_size"]),
+            "--batch-size",
+            str(run_params["batch_size"]),
+            "--device",
+            str(run_params["device"]),
+            "--clip-backend",
+            str(run_params["clip_backend"]),
+            "--model-name",
+            str(run_params["model_name"]),
+            "--pca-levels",
+            str(run_params["pca_levels"]),
+            "--ari-seeds",
+            str(run_params["ari_seeds"]),
+            "--max-pairs-per-bucket",
+            str(run_params["max_pairs_per_bucket"]),
+        ]
+
+        self._append_output(f"[info] dataset mode: {dataset_mode}\n")
+        self._append_output(f"[info] dataset root: {dataset_root}\n")
+        self._append_output(f"[info] phase3 output dir: {self.output_dir}\n")
 
         try:
             process = subprocess.Popen(
@@ -462,15 +686,26 @@ class IgdbFetchRunner:
             cmd.extend(["--search-query", query.strip()])
         if company.strip():
             cmd.extend(["--search-company", company.strip()])
-        result = subprocess.run(
-            cmd,
-            cwd=str(self.project_root),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=60,
-            check=False,
-        )
+        # Multi-studio lookups can take longer because each studio triggers additional IGDB queries.
+        company_count = len([token for token in re.split(r"[,\n;]+", company) if token.strip()])
+        computed_timeout = max(120, 45 * max(1, company_count) + int(limit * 1.5))
+        search_timeout_seconds = min(900, computed_timeout)
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=str(self.project_root),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=search_timeout_seconds,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                "IGDB search timed out. "
+                f"Studios provided: {max(1, company_count)}. Requested limit: {limit}. "
+                "Try fewer studios per search (for example 3-5), then run another search."
+            ) from exc
         output = (result.stdout or "").strip()
         if result.returncode != 0:
             raise RuntimeError(output or f"search script exited with code {result.returncode}")
@@ -582,6 +817,7 @@ class AppHandler(SimpleHTTPRequestHandler):
     """Static file handler + tiny JSON API for analysis control."""
 
     runner: AnalysisRunner
+    phase3_runner: Phase3Runner
     igdb_runner: IgdbFetchRunner
 
     def end_headers(self) -> None:  # noqa: D401
@@ -604,13 +840,16 @@ class AppHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/status":
             self._send_json(self.runner.status())
             return
+        if parsed.path == "/api/phase3-status":
+            self._send_json(self.phase3_runner.status())
+            return
         if parsed.path == "/api/igdb-status":
             self._send_json(self.igdb_runner.status())
             return
         if parsed.path == "/api/game-folders":
             try:
                 folders = sorted(
-                    [p.name for p in DATASET_DIR.iterdir() if p.is_dir()],
+                    [p.name for p in self.igdb_runner.dataset_dir.iterdir() if p.is_dir()],
                     key=lambda value: value.lower(),
                 )
             except Exception as exc:  # pragma: no cover - runtime guard
@@ -664,8 +903,57 @@ class AppHandler(SimpleHTTPRequestHandler):
                     status_code=409,
                 )
                 return
+            if self.phase3_runner.status().get("running"):
+                self._send_json(
+                    {"ok": False, "message": "Cannot run analysis while phase-3 analysis is running."},
+                    status_code=409,
+                )
+                return
 
             started, message = self.runner.start(run_params)
+            status_code = 202 if started else 409
+            self._send_json(
+                {"ok": started, "message": message, "params": run_params},
+                status_code=status_code,
+            )
+            return
+
+        if parsed.path == "/api/run-phase3":
+            content_length = int(self.headers.get("Content-Length", "0") or "0")
+            if content_length > MAX_REQUEST_BYTES:
+                self._send_json(
+                    {"ok": False, "message": f"Payload too large (>{MAX_REQUEST_BYTES} bytes)."},
+                    status_code=413,
+                )
+                return
+
+            raw_body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+            try:
+                payload = json.loads(raw_body.decode("utf-8"))
+            except json.JSONDecodeError:
+                self._send_json({"ok": False, "message": "Invalid JSON payload."}, status_code=400)
+                return
+
+            try:
+                run_params = parse_phase3_run_params(payload)
+            except ValueError as exc:
+                self._send_json({"ok": False, "message": str(exc)}, status_code=400)
+                return
+
+            if self.runner.status().get("running"):
+                self._send_json(
+                    {"ok": False, "message": "Cannot run phase-3 analysis while main analysis is running."},
+                    status_code=409,
+                )
+                return
+            if self.igdb_runner.status().get("running"):
+                self._send_json(
+                    {"ok": False, "message": "Cannot run phase-3 analysis while IGDB cover fetch is running."},
+                    status_code=409,
+                )
+                return
+
+            started, message = self.phase3_runner.start(run_params)
             status_code = 202 if started else 409
             self._send_json(
                 {"ok": started, "message": message, "params": run_params},
@@ -701,6 +989,12 @@ class AppHandler(SimpleHTTPRequestHandler):
                     status_code=409,
                 )
                 return
+            if self.phase3_runner.status().get("running"):
+                self._send_json(
+                    {"ok": False, "message": "Cannot fetch IGDB covers while phase-3 analysis is running."},
+                    status_code=409,
+                )
+                return
 
             started, message = self.igdb_runner.start(run_params)
             status_code = 202 if started else 409
@@ -717,6 +1011,18 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Serve CLIP explorer and run analysis from UI.")
     parser.add_argument("--host", default="127.0.0.1", help="Host interface to bind.")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind.")
+    parser.add_argument(
+        "--dataset-root",
+        type=Path,
+        default=DATASET_DIR,
+        help=f"Main dataset root used for analysis and IGDB operations (default: {DATASET_DIR}).",
+    )
+    parser.add_argument(
+        "--demo-dataset-root",
+        type=Path,
+        default=DEMO_DATASET_DIR,
+        help=f"Demo dataset root used when dataset_mode=demo (default: {DEMO_DATASET_DIR}).",
+    )
     return parser.parse_args()
 
 
@@ -729,18 +1035,30 @@ def main() -> None:
         raise SystemExit(f"[ERROR] pipeline script not found: {PIPELINE_PATH}")
     if not IGDB_FETCH_PATH.exists():
         raise SystemExit(f"[ERROR] IGDB fetch script not found: {IGDB_FETCH_PATH}")
+    if not PHASE3_PATH.exists():
+        raise SystemExit(f"[ERROR] phase-3 script not found: {PHASE3_PATH}")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    PHASE3_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     runner = AnalysisRunner(
         project_root=PROJECT_ROOT,
         pipeline_path=PIPELINE_PATH,
         output_dir=OUTPUT_DIR,
+        full_dataset_dir=args.dataset_root.expanduser().resolve(),
+        demo_dataset_dir=args.demo_dataset_root.expanduser().resolve(),
+    )
+    phase3_runner = Phase3Runner(
+        project_root=PROJECT_ROOT,
+        phase3_script_path=PHASE3_PATH,
+        output_dir=PHASE3_OUTPUT_DIR,
+        full_dataset_dir=args.dataset_root.expanduser().resolve(),
+        demo_dataset_dir=args.demo_dataset_root.expanduser().resolve(),
     )
     igdb_runner = IgdbFetchRunner(
         project_root=PROJECT_ROOT,
         fetch_script_path=IGDB_FETCH_PATH,
-        dataset_dir=DATASET_DIR,
+        dataset_dir=args.dataset_root.expanduser().resolve(),
         mapping_csv_path=DEFAULT_IGDB_MAPPING_CSV,
         report_json_path=DEFAULT_IGDB_REPORT_JSON,
         groups_csv_path=DEFAULT_GAME_GROUPS_CSV,
@@ -748,10 +1066,13 @@ def main() -> None:
 
     handler = partial(AppHandler, directory=str(WEB_DIR))
     AppHandler.runner = runner
+    AppHandler.phase3_runner = phase3_runner
     AppHandler.igdb_runner = igdb_runner
 
     server = ThreadingHTTPServer((args.host, args.port), handler)
     print(f"Serving app on http://{args.host}:{args.port}")
+    print(f"Full dataset root: {args.dataset_root.expanduser().resolve()}")
+    print(f"Demo dataset root: {args.demo_dataset_root.expanduser().resolve()}")
     print("Use 'Run Analysis' or IGDB buttons in the UI to start background jobs.")
 
     try:

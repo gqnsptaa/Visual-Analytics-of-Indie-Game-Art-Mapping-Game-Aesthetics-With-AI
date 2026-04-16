@@ -30,9 +30,12 @@ try:
     import numpy as np
     import torch
     from PIL import Image
-    from sklearn.cluster import KMeans
+    from sklearn.cluster import DBSCAN, KMeans
+    from sklearn.datasets import make_swiss_roll
     from sklearn.decomposition import PCA
-    from sklearn.manifold import TSNE
+    from sklearn.manifold import LocallyLinearEmbedding, TSNE, trustworthiness
+    from sklearn.metrics import pairwise_distances
+    from sklearn.neighbors import LocalOutlierFactor
 except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
     missing_name = exc.name or "unknown"
     raise SystemExit(
@@ -44,27 +47,43 @@ except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
 DATASET_ROOT = Path("/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset")
 
 DEFAULT_STYLE_PROMPTS = [
-    "cinematic low-key lighting",
-    "high-key soft diffuse lighting",
-    "volumetric god rays",
-    "hyper-realistic physically based 3D render",
-    "stylized cel-shaded render",
-    "flat geometric vector design",
-    "isometric composition",
-    "epic wide-angle composition",
-    "symmetrical centered composition",
-    "asymmetrical dynamic composition",
-    "strong negative space",
-    "complementary color contrast",
-    "muted desaturated color palette",
-    "neon cyberpunk color palette",
-    "grainy lo-fi texture",
-    "halftone print texture",
-    "gothic ornamental art direction",
-    "minimal diegetic UI",
-    "Narrative-Driven Cover",
-    "Symbolic-Driven Cover",
-    "Multimodal Design",
+    "hand-painted illustration style indie game",
+    "mixed media game visuals experimental",
+    "cel-shaded rendering stylized",
+    "low poly aesthetic minimalist",
+    "high fidelity 3D graphics AAA game",
+    "photorealistic rendering cinematic",
+    "abstract symbolic game art",
+    "stylized rendering non-realistic",
+    "chiaroscuro lighting dramatic shadows",
+    "low key lighting cinematic",
+    "soft diffuse lighting environment",
+    "neon lighting cyberpunk style",
+    "global illumination realistic lighting",
+    "flat lighting minimal shadows",
+    "isometric game view",
+    "top-down perspective game scene",
+    "side-scrolling composition",
+    "symmetrical composition game scene",
+    "dynamic action scene with motion blur",
+    "negative space emphasis minimal composition",
+    "minimalist composition clean layout",
+    "dense cluttered environment high detail",
+    "muted color palette",
+    "vibrant saturated colors",
+    "monochrome palette",
+    "pastel color scheme",
+    "hand-painted textures visible brush strokes",
+    "grainy textured surfaces rough detail",
+    "bold typography game UI",
+    "minimal UI text design",
+    "ornate fantasy typography",
+    "experimental typography layout",
+    "diegetic UI integrated into environment",
+    "HUD overlay interface",
+    "symbolic environmental storytelling",
+    "metaphorical scene design",
+    "abstract narrative visual elements",
 ]
 
 
@@ -147,9 +166,15 @@ class StyleAdapterHead(torch.nn.Module):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run CLIP indie aesthetics analysis using local dataset folder "
-            f"at: {DATASET_ROOT}"
+            "Run CLIP indie aesthetics analysis using a local dataset folder "
+            "(default set to your project dataset root)."
         )
+    )
+    parser.add_argument(
+        "--dataset-root",
+        type=Path,
+        default=DATASET_ROOT,
+        help=f"Dataset root folder containing one subfolder per game (default: {DATASET_ROOT}).",
     )
     parser.add_argument(
         "--output-dir",
@@ -205,6 +230,43 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="KMeans cluster count (0 = number of unique labels).",
+    )
+    parser.add_argument(
+        "--dbscan-eps",
+        type=float,
+        default=0.14,
+        help="DBSCAN epsilon radius over CLIP embeddings.",
+    )
+    parser.add_argument(
+        "--dbscan-min-samples",
+        type=int,
+        default=4,
+        help="DBSCAN min_samples value.",
+    )
+    parser.add_argument(
+        "--dbscan-metric",
+        type=str,
+        default="cosine",
+        choices=["cosine", "euclidean"],
+        help="Distance metric used by DBSCAN.",
+    )
+    parser.add_argument(
+        "--swiss-roll-samples",
+        type=int,
+        default=250,
+        help="Number of synthetic swiss-roll points for projection sanity check (0 disables).",
+    )
+    parser.add_argument(
+        "--swiss-roll-noise",
+        type=float,
+        default=0.03,
+        help="Noise level for synthetic swiss-roll points.",
+    )
+    parser.add_argument(
+        "--swiss-roll-lle-neighbors",
+        type=int,
+        default=12,
+        help="Neighbor count for LLE swiss-roll reduction.",
     )
     parser.add_argument(
         "--style-prompts-file",
@@ -360,13 +422,29 @@ def load_clip_adapter(backend: str, model_name: str, device: torch.device) -> Cl
     )
 
 
+def parse_prompts_file_lines(path: Path) -> list[str]:
+    """Read prompt files with optional section headers/comments."""
+    prompts: list[str] = []
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        # Support human-friendly grouped prompt files.
+        if line.startswith("#"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            continue
+        prompts.append(line)
+    return prompts
+
+
 def load_style_prompts(path: Path | None) -> list[str]:
     if path is None:
         source_prompts = list(DEFAULT_STYLE_PROMPTS)
     else:
         if not path.exists():
             raise PipelineError(f"Style prompts file not found: {path}")
-        source_prompts = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        source_prompts = parse_prompts_file_lines(path)
         if not source_prompts:
             raise PipelineError(f"Style prompts file is empty: {path}")
 
@@ -392,7 +470,7 @@ def load_prompt_focus(path: Path | None) -> list[str]:
     if not path.exists():
         return []
 
-    raw = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    raw = parse_prompts_file_lines(path)
     focus: list[str] = []
     seen: set[str] = set()
     for prompt in raw:
@@ -630,19 +708,32 @@ def cosine_similarity_matrix(matrix: np.ndarray) -> np.ndarray:
     return np.clip(matrix @ matrix.T, -1.0, 1.0).astype(np.float32)
 
 
-def pca_to_3d(embeddings: np.ndarray) -> np.ndarray:
+def pca_analysis_3d(embeddings: np.ndarray, seed: int = 42) -> tuple[np.ndarray, dict]:
     n_samples, n_features = embeddings.shape
     n_comp = min(3, n_samples, n_features)
     if n_comp <= 0:
         raise PipelineError("Cannot run PCA fallback on empty embeddings.")
 
-    reducer = PCA(n_components=n_comp, random_state=42)
+    reducer = PCA(n_components=n_comp, random_state=seed)
     reduced = reducer.fit_transform(embeddings).astype(np.float32)
+    explained = [float(v) for v in reducer.explained_variance_ratio_.tolist()]
+    explained_total = float(np.sum(reducer.explained_variance_ratio_))
 
     if n_comp < 3:
         pad = np.zeros((n_samples, 3 - n_comp), dtype=np.float32)
         reduced = np.concatenate([reduced, pad], axis=1)
+        explained.extend([0.0] * (3 - n_comp))
 
+    return reduced, {
+        "method": "pca",
+        "n_components_fitted": int(n_comp),
+        "explained_variance_ratio": explained[:3],
+        "explained_variance_total": explained_total,
+    }
+
+
+def pca_to_3d(embeddings: np.ndarray) -> np.ndarray:
+    reduced, _ = pca_analysis_3d(embeddings, seed=42)
     return reduced
 
 
@@ -742,11 +833,329 @@ def safe_kmeans(embeddings: np.ndarray, labels: list[str], desired_k: int, seed:
     return cluster_ids, {"k": k}
 
 
+def safe_dbscan(
+    embeddings: np.ndarray,
+    eps: float,
+    min_samples: int,
+    metric: str,
+) -> tuple[np.ndarray, dict]:
+    n_samples = int(embeddings.shape[0])
+    if n_samples <= 0:
+        raise PipelineError("Cannot run DBSCAN on empty embeddings.")
+    if eps <= 0:
+        raise PipelineError("dbscan-eps must be > 0.")
+    if min_samples < 1:
+        raise PipelineError("dbscan-min-samples must be >= 1.")
+
+    try:
+        model = DBSCAN(
+            eps=float(eps),
+            min_samples=int(min_samples),
+            metric=metric,
+        )
+        cluster_ids = model.fit_predict(embeddings).astype(np.int32)
+    except Exception as exc:
+        cluster_ids = np.full((n_samples,), -1, dtype=np.int32)
+        return cluster_ids, {
+            "method": "dbscan",
+            "metric": metric,
+            "eps": float(eps),
+            "min_samples": int(min_samples),
+            "status": "failed",
+            "reason": str(exc),
+            "num_clusters": 0,
+            "noise_count": int(n_samples),
+            "noise_fraction": 1.0,
+        }
+
+    unique = set(int(v) for v in cluster_ids.tolist())
+    n_noise = int(np.sum(cluster_ids == -1))
+    n_clusters = len([v for v in unique if v != -1])
+    return cluster_ids, {
+        "method": "dbscan",
+        "metric": metric,
+        "eps": float(eps),
+        "min_samples": int(min_samples),
+        "status": "ok",
+        "num_clusters": int(n_clusters),
+        "noise_count": int(n_noise),
+        "noise_fraction": float(n_noise / max(1, n_samples)),
+    }
+
+
+def build_swiss_roll_demo(
+    n_samples: int,
+    noise: float,
+    seed: int,
+    lle_neighbors: int,
+) -> dict:
+    if n_samples <= 0:
+        return {
+            "enabled": False,
+            "reason": "disabled",
+            "samples": [],
+        }
+    if n_samples < 20:
+        raise PipelineError("swiss-roll-samples must be at least 20 when enabled.")
+    if noise < 0:
+        raise PipelineError("swiss-roll-noise must be >= 0.")
+    if lle_neighbors < 2:
+        raise PipelineError("swiss-roll-lle-neighbors must be >= 2.")
+
+    raw_points, t_values = make_swiss_roll(n_samples=n_samples, noise=noise, random_state=seed)
+    raw_points = raw_points.astype(np.float32)
+    t_values = t_values.astype(np.float32)
+
+    # Match the benchmark workflow: compare nonlinear LLE vs linear PCA in 2D.
+    pca = PCA(n_components=2, random_state=seed)
+    pca_2d = pca.fit_transform(raw_points).astype(np.float32)
+    pca_error = float(max(0.0, 1.0 - float(np.sum(pca.explained_variance_ratio_))))
+
+    safe_neighbors = max(2, min(int(lle_neighbors), int(n_samples - 1)))
+    lle_error = None
+    lle_status = "ok"
+    lle_reason = ""
+    try:
+        lle = LocallyLinearEmbedding(
+            n_neighbors=safe_neighbors,
+            n_components=2,
+            method="standard",
+            eigen_solver="auto",
+            random_state=seed,
+        )
+        lle_2d = lle.fit_transform(raw_points).astype(np.float32)
+        lle_error = float(getattr(lle, "reconstruction_error_", np.nan))
+    except Exception as exc:
+        # Keep demo available even if LLE numerics fail for a parameter setting.
+        lle_2d = pca_2d.copy()
+        lle_status = "failed_fallback_to_pca"
+        lle_reason = str(exc)
+        lle_error = None
+
+    t_min = float(np.min(t_values))
+    t_max = float(np.max(t_values))
+    denom = max(1e-12, t_max - t_min)
+    t_norm = ((t_values - t_min) / denom).astype(np.float32)
+
+    samples = []
+    for idx in range(int(n_samples)):
+        samples.append(
+            {
+                "id": int(idx),
+                "color_value": float(t_norm[idx]),
+                "original": [float(v) for v in raw_points[idx].tolist()],
+                "lle_2d": [float(v) for v in lle_2d[idx].tolist()],
+                "pca_2d": [float(v) for v in pca_2d[idx].tolist()],
+            }
+        )
+
+    return {
+        "enabled": True,
+        "meta": {
+            "n_samples": int(n_samples),
+            "noise": float(noise),
+            "seed": int(seed),
+            "source": "sklearn.datasets.make_swiss_roll",
+            "lle": {
+                "status": lle_status,
+                "reason": lle_reason,
+                "n_neighbors": int(safe_neighbors),
+                "n_components": 2,
+                "reconstruction_error": lle_error,
+            },
+            "pca": {
+                "n_components": 2,
+                "explained_variance_ratio": [float(v) for v in pca.explained_variance_ratio_.tolist()],
+                "error": pca_error,
+            },
+        },
+        "samples": samples,
+    }
+
+
 def crosstab_counts(labels: list[str], clusters: np.ndarray) -> dict[str, dict[str, int]]:
     table: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for label, cluster in zip(labels, clusters):
         table[label][str(int(cluster))] += 1
     return {label: dict(counts) for label, counts in sorted(table.items())}
+
+
+def knn_indices(matrix: np.ndarray, k: int, metric: str) -> np.ndarray:
+    """Return nearest-neighbor indices (excluding self) for each point."""
+    if matrix.shape[0] < 2:
+        return np.zeros((matrix.shape[0], 0), dtype=np.int32)
+    safe_k = max(1, min(int(k), int(matrix.shape[0] - 1)))
+    distances = pairwise_distances(matrix, metric=metric)
+    np.fill_diagonal(distances, np.inf)
+    return np.argsort(distances, axis=1)[:, :safe_k].astype(np.int32)
+
+
+def neighborhood_overlap(high_dim: np.ndarray, low_dim: np.ndarray, k: int, high_metric: str = "cosine") -> float:
+    """Average k-NN overlap between high-dimensional and projected spaces."""
+    if high_dim.shape[0] < 2:
+        return 0.0
+    high_nn = knn_indices(high_dim, k=k, metric=high_metric)
+    low_nn = knn_indices(low_dim, k=k, metric="euclidean")
+    if high_nn.shape[1] == 0 or low_nn.shape[1] == 0:
+        return 0.0
+
+    safe_k = int(min(high_nn.shape[1], low_nn.shape[1]))
+    overlaps = []
+    for i in range(high_nn.shape[0]):
+        hs = set(int(v) for v in high_nn[i, :safe_k].tolist())
+        ls = set(int(v) for v in low_nn[i, :safe_k].tolist())
+        overlaps.append(len(hs & ls) / max(1, safe_k))
+    return float(np.mean(overlaps))
+
+
+def projection_quality_report(
+    embeddings: np.ndarray,
+    projections: dict[str, np.ndarray],
+    n_neighbors: int,
+) -> dict:
+    """Compute embedding quality metrics to compare DR methods."""
+    n_samples = int(embeddings.shape[0])
+    if n_samples < 3:
+        return {
+            "enabled": False,
+            "reason": "too_few_samples",
+            "n_neighbors": int(max(1, n_neighbors)),
+            "methods": {},
+        }
+
+    safe_k = max(2, min(int(n_neighbors), n_samples - 1))
+    methods: dict[str, dict] = {}
+    for name, coords in projections.items():
+        if not isinstance(coords, np.ndarray) or coords.ndim != 2 or coords.shape[0] != n_samples:
+            methods[name] = {
+                "status": "invalid_projection",
+            }
+            continue
+        try:
+            trust = float(
+                trustworthiness(
+                    embeddings,
+                    coords,
+                    n_neighbors=safe_k,
+                    metric="cosine",
+                )
+            )
+        except Exception as exc:
+            methods[name] = {
+                "status": "failed",
+                "reason": str(exc),
+            }
+            continue
+
+        # Continuity proxy: reverse trustworthiness direction (approximation).
+        try:
+            continuity_proxy = float(
+                trustworthiness(
+                    coords,
+                    embeddings,
+                    n_neighbors=safe_k,
+                    metric="euclidean",
+                )
+            )
+        except Exception:
+            continuity_proxy = float("nan")
+
+        overlap = neighborhood_overlap(
+            high_dim=embeddings,
+            low_dim=coords,
+            k=safe_k,
+            high_metric="cosine",
+        )
+
+        methods[name] = {
+            "status": "ok",
+            "trustworthiness": trust,
+            "continuity_proxy": continuity_proxy if np.isfinite(continuity_proxy) else None,
+            "knn_overlap": float(overlap),
+            "n_neighbors": int(safe_k),
+        }
+
+    return {
+        "enabled": True,
+        "n_neighbors": int(safe_k),
+        "methods": methods,
+    }
+
+
+def detect_outliers(
+    embeddings: np.ndarray,
+    valid_records: list[ImageRecord],
+    labels: list[str],
+    groups: list[str],
+    dbscan_ids: np.ndarray,
+    max_rows: int = 80,
+) -> tuple[np.ndarray, np.ndarray, list[dict], dict]:
+    """Detect outliers using LOF score and DBSCAN noise labels."""
+    n_samples = int(embeddings.shape[0])
+    if n_samples == 0:
+        return (
+            np.zeros((0,), dtype=np.float32),
+            np.zeros((0,), dtype=np.bool_),
+            [],
+            {"enabled": False, "reason": "no_samples"},
+        )
+    if n_samples < 5:
+        scores = np.zeros((n_samples,), dtype=np.float32)
+        flags = (dbscan_ids == -1) if dbscan_ids.size == n_samples else np.zeros((n_samples,), dtype=np.bool_)
+        return (
+            scores,
+            flags.astype(np.bool_),
+            [],
+            {
+                "enabled": False,
+                "reason": "too_few_samples_for_lof",
+                "num_flagged": int(np.sum(flags)),
+            },
+        )
+
+    lof_neighbors = max(5, min(20, n_samples - 1))
+    lof = LocalOutlierFactor(n_neighbors=lof_neighbors, metric="cosine")
+    lof.fit_predict(embeddings)
+    scores = (-lof.negative_outlier_factor_).astype(np.float32)
+
+    dbscan_noise = (dbscan_ids == -1) if dbscan_ids.size == n_samples else np.zeros((n_samples,), dtype=np.bool_)
+    score_threshold = float(np.quantile(scores, 0.95))
+    score_flag = scores >= score_threshold
+    flags = np.logical_or(dbscan_noise, score_flag)
+
+    order = np.argsort(scores)
+    ranks = np.empty_like(order)
+    ranks[order] = np.arange(n_samples)
+    percentiles = ranks.astype(np.float32) / max(1, n_samples - 1)
+
+    top_n = max(1, min(int(max_rows), n_samples))
+    top_idx = np.argsort(scores)[::-1][:top_n]
+    outlier_rows: list[dict] = []
+    for rank_pos, idx in enumerate(top_idx, start=1):
+        rec = valid_records[idx]
+        outlier_rows.append(
+            {
+                "rank": int(rank_pos),
+                "image_id": int(rec.image_id),
+                "label": labels[idx],
+                "group": groups[idx],
+                "path": str(rec.path),
+                "outlier_score": float(scores[idx]),
+                "outlier_percentile": float(percentiles[idx]),
+                "dbscan_noise": bool(dbscan_noise[idx]),
+                "flagged": bool(flags[idx]),
+            }
+        )
+
+    meta = {
+        "enabled": True,
+        "method": "local_outlier_factor_plus_dbscan_noise",
+        "lof_neighbors": int(lof_neighbors),
+        "score_threshold_q95": float(score_threshold),
+        "num_flagged": int(np.sum(flags)),
+        "num_dbscan_noise": int(np.sum(dbscan_noise)),
+    }
+    return scores, flags.astype(np.bool_), outlier_rows, meta
 
 
 def average_scores_by_label(sample_scores: np.ndarray, labels: list[str]) -> tuple[list[str], np.ndarray]:
@@ -987,9 +1396,18 @@ def log_vector_preview(
 
 def run() -> int:
     args = parse_args()
+    dataset_root = args.dataset_root.expanduser().resolve()
     set_seed(args.seed)
     if args.debug_vector_preview_dims < 1 or args.debug_vector_preview_dims > 128:
         raise PipelineError("debug-vector-preview-dims must be between 1 and 128.")
+    if args.dbscan_eps <= 0:
+        raise PipelineError("dbscan-eps must be > 0.")
+    if args.dbscan_min_samples < 1:
+        raise PipelineError("dbscan-min-samples must be >= 1.")
+    if args.swiss_roll_samples < 0:
+        raise PipelineError("swiss-roll-samples must be >= 0.")
+    if args.swiss_roll_noise < 0:
+        raise PipelineError("swiss-roll-noise must be >= 0.")
 
     def log(message: str) -> None:
         print(message, flush=True)
@@ -1007,11 +1425,11 @@ def run() -> int:
 
     log("[Init] Selecting device and scanning dataset...")
     device = choose_device(args.device)
-    records = collect_image_records(DATASET_ROOT, valid_ext, args.max_images)
+    records = collect_image_records(dataset_root, valid_ext, args.max_images)
     if not records:
         raise PipelineError(
             "No images found in dataset folder. Ensure structure is: "
-            f"{DATASET_ROOT}/GameName/*.jpg"
+            f"{dataset_root}/GameName/*.jpg"
         )
 
     log("[Init] Loading CLIP backend (this can take time on first run)...")
@@ -1023,7 +1441,7 @@ def run() -> int:
     prompt_focus = load_prompt_focus(args.prompt_focus_file)
     game_group_map = load_game_groups(args.game_groups_file)
 
-    log(f"Dataset source: local-only ({DATASET_ROOT})")
+    log(f"Dataset source: local-only ({dataset_root})")
     log(f"Found {len(records)} image candidates across {len(set(r.label for r in records))} games.")
     log(f"Running CLIP on device={device.type} backend={adapter.backend_name} model={args.model_name}")
 
@@ -1038,7 +1456,8 @@ def run() -> int:
     if len(valid_records) < 2:
         raise PipelineError("Need at least 2 valid images after filtering/skips.")
 
-    log("[Step 2/7] Computing 3D t-SNE and UMAP coordinates...")
+    log("[Step 2/8] Computing 3D PCA, t-SNE, and UMAP coordinates...")
+    pca_points, pca_meta = pca_analysis_3d(embeddings, seed=args.seed)
     tsne_points, tsne_meta = adaptive_tsne_3d(embeddings, args.tsne_perplexity, args.seed)
     umap_points, umap_meta = adaptive_umap_3d(embeddings, args.umap_n_neighbors, args.umap_min_dist, args.seed)
 
@@ -1048,11 +1467,37 @@ def run() -> int:
     unique_groups, group_centroids = normalized_centroids(embeddings, sample_groups)
     group_similarity_matrix = cosine_similarity_matrix(group_centroids)
 
-    log("[Step 4/7] Running KMeans clustering...")
+    log("[Step 4/8] Running KMeans and DBSCAN clustering...")
     cluster_ids, kmeans_meta = safe_kmeans(embeddings, labels, args.kmeans_k, args.seed)
     cluster_crosstab = crosstab_counts(labels, cluster_ids)
+    dbscan_ids, dbscan_meta = safe_dbscan(
+        embeddings=embeddings,
+        eps=args.dbscan_eps,
+        min_samples=args.dbscan_min_samples,
+        metric=args.dbscan_metric,
+    )
+    dbscan_crosstab = crosstab_counts(labels, dbscan_ids)
 
-    log("[Step 5/7] Scoring prompts against CLIP embeddings...")
+    log("[Step 4b/8] Evaluating projection quality and outliers...")
+    quality_report = projection_quality_report(
+        embeddings=embeddings,
+        projections={
+            "pca": pca_points,
+            "umap": umap_points,
+            "tsne": tsne_points,
+        },
+        n_neighbors=min(15, max(2, len(valid_records) - 1)),
+    )
+    outlier_scores, outlier_flags, outlier_rows, outlier_meta = detect_outliers(
+        embeddings=embeddings,
+        valid_records=valid_records,
+        labels=labels,
+        groups=sample_groups,
+        dbscan_ids=dbscan_ids,
+        max_rows=120,
+    )
+
+    log("[Step 5/8] Scoring prompts against CLIP embeddings...")
     with torch.inference_mode():
         text_features = adapter.encode_text(prompts).detach().cpu().numpy().astype(np.float32)
     if args.debug_vector_preview:
@@ -1081,7 +1526,7 @@ def run() -> int:
     ]
 
     if args.style_adapter_checkpoint is not None:
-        log("[Step 5b/7] Applying style adapter checkpoint...")
+        log("[Step 5b/8] Applying style adapter checkpoint...")
         (
             adapter_games,
             adapter_scores,
@@ -1114,16 +1559,25 @@ def run() -> int:
     )
     if prompt_focus_meta.get("enabled"):
         log(
-            "[Step 5c/7] Applied prompt focus subset "
+            "[Step 5c/8] Applied prompt focus subset "
             f"{prompt_focus_meta.get('selected_prompts')}/{prompt_focus_meta.get('total_prompts')} prompts "
             f"from {args.prompt_focus_file}"
         )
     else:
         reason = str(prompt_focus_meta.get("reason", "unknown"))
-        log(f"[Step 5c/7] Prompt focus not applied ({reason}); using all {len(full_prompt_labels)} prompts.")
+        log(f"[Step 5c/8] Prompt focus not applied ({reason}); using all {len(full_prompt_labels)} prompts.")
+
+    log("[Step 6/8] Generating Swiss-roll projection demo...")
+    swiss_roll_demo = build_swiss_roll_demo(
+        n_samples=args.swiss_roll_samples,
+        noise=args.swiss_roll_noise,
+        seed=args.seed,
+        lle_neighbors=args.swiss_roll_lle_neighbors,
+    )
+
     thumbnail_map: dict[int, str] = {}
     if args.export_thumbnails:
-        log("[Step 6/7] Exporting thumbnails...")
+        log("[Step 7/8] Exporting thumbnails...")
         thumbnail_map = export_sample_thumbnails(
             records=valid_records,
             output_dir=output_dir,
@@ -1143,8 +1597,12 @@ def run() -> int:
                 "path": str(rec.path),
                 "thumbnail": thumbnail_map.get(rec.image_id),
                 "cluster_id": int(cluster_ids[i]),
+                "dbscan_cluster_id": int(dbscan_ids[i]),
                 "style_pred_label": style_sample_predictions[i]["style_pred_label"],
                 "style_pred_confidence": style_sample_predictions[i]["style_pred_confidence"],
+                "outlier_score": float(outlier_scores[i]),
+                "outlier_flag": bool(outlier_flags[i]),
+                "pca": [float(x) for x in pca_points[i].tolist()],
                 "tsne": [float(x) for x in tsne_points[i].tolist()],
                 "umap": [float(x) for x in umap_points[i].tolist()],
             }
@@ -1153,7 +1611,7 @@ def run() -> int:
     results = {
         "meta": {
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
-            "root_dir": str(DATASET_ROOT),
+            "root_dir": str(dataset_root),
             "device": device.type,
             "clip_backend": adapter.backend_name,
             "model_name": args.model_name,
@@ -1169,7 +1627,8 @@ def run() -> int:
             },
             "data_source": {
                 "source": "local_only",
-                "fixed_dataset_root": str(DATASET_ROOT),
+                "dataset_root": str(dataset_root),
+                "default_dataset_root": str(DATASET_ROOT),
                 "game_groups_file": str(args.game_groups_file),
             },
         },
@@ -1178,7 +1637,11 @@ def run() -> int:
             "seed": args.seed,
             "tsne": tsne_meta,
             "umap": umap_meta,
+            "pca": pca_meta,
             "kmeans": kmeans_meta,
+            "dbscan": dbscan_meta,
+            "projection_quality": quality_report,
+            "outlier_detection": outlier_meta,
             "prompt_focus": {
                 **prompt_focus_meta,
                 "source_file": str(args.prompt_focus_file) if args.prompt_focus_file is not None else None,
@@ -1190,6 +1653,12 @@ def run() -> int:
                 "enabled": bool(args.export_thumbnails),
                 "size": int(args.thumbnail_size),
                 "exported_count": len(thumbnail_map),
+            },
+            "swiss_roll_demo": {
+                "enabled": bool(swiss_roll_demo.get("enabled")),
+                "n_samples": int(args.swiss_roll_samples),
+                "noise": float(args.swiss_roll_noise),
+                "lle_neighbors": int(args.swiss_roll_lle_neighbors),
             },
         },
         "samples": samples,
@@ -1204,6 +1673,19 @@ def run() -> int:
         "clusters": {
             "k": int(kmeans_meta["k"]),
             "crosstab": cluster_crosstab,
+            "kmeans": {
+                "k": int(kmeans_meta["k"]),
+                "crosstab": cluster_crosstab,
+            },
+            "dbscan": {
+                "meta": dbscan_meta,
+                "crosstab": dbscan_crosstab,
+            },
+        },
+        "projection_quality": quality_report,
+        "outliers": {
+            "meta": outlier_meta,
+            "rows": outlier_rows,
         },
         "prompt_similarity": {
             "games": prompt_games,
@@ -1241,11 +1723,12 @@ def run() -> int:
             "matrix": [[float(v) for v in row] for row in clip_group_prompt_scores.tolist()],
             "source": "clip_text_prompts",
         },
+        "swiss_roll_demo": swiss_roll_demo,
         "skipped_images": skipped_images,
     }
 
     json_path = output_dir / "analysis_results.json"
-    log("[Step 7/7] Writing JSON/CSV outputs...")
+    log("[Step 8/8] Writing JSON/CSV outputs...")
     atomic_write_text(json_path, json.dumps(results, indent=2), encoding="utf-8")
 
     sample_rows = []
@@ -1258,8 +1741,14 @@ def run() -> int:
                 "path": sample["path"],
                 "thumbnail": sample.get("thumbnail") or "",
                 "cluster_id": sample["cluster_id"],
+                "dbscan_cluster_id": sample.get("dbscan_cluster_id", -1),
                 "style_pred_label": sample.get("style_pred_label", ""),
                 "style_pred_confidence": sample.get("style_pred_confidence", 0.0),
+                "outlier_score": sample.get("outlier_score", 0.0),
+                "outlier_flag": sample.get("outlier_flag", False),
+                "pca_x": sample["pca"][0],
+                "pca_y": sample["pca"][1],
+                "pca_z": sample["pca"][2],
                 "tsne_x": sample["tsne"][0],
                 "tsne_y": sample["tsne"][1],
                 "tsne_z": sample["tsne"][2],
@@ -1279,8 +1768,14 @@ def run() -> int:
             "path",
             "thumbnail",
             "cluster_id",
+            "dbscan_cluster_id",
             "style_pred_label",
             "style_pred_confidence",
+            "outlier_score",
+            "outlier_flag",
+            "pca_x",
+            "pca_y",
+            "pca_z",
             "tsne_x",
             "tsne_y",
             "tsne_z",
@@ -1335,6 +1830,16 @@ def run() -> int:
         for cluster_str, count in sorted(clusters.items(), key=lambda x: int(x[0])):
             crosstab_rows.append({"game": game, "cluster_id": cluster_str, "count": count})
     write_csv(output_dir / "cluster_crosstab.csv", crosstab_rows, ["game", "cluster_id", "count"])
+    dbscan_crosstab_rows = []
+    for game, clusters in dbscan_crosstab.items():
+        for cluster_str, count in sorted(clusters.items(), key=lambda x: int(x[0])):
+            dbscan_crosstab_rows.append({"game": game, "cluster_id": cluster_str, "count": count})
+    write_csv(output_dir / "dbscan_cluster_crosstab.csv", dbscan_crosstab_rows, ["game", "cluster_id", "count"])
+    write_csv(
+        output_dir / "outlier_rows.csv",
+        outlier_rows,
+        ["rank", "image_id", "label", "group", "path", "outlier_score", "outlier_percentile", "dbscan_noise", "flagged"],
+    )
 
     if args.save_embeddings:
         np.save(output_dir / "clip_embeddings.npy", embeddings)
@@ -1350,6 +1855,12 @@ def run() -> int:
         f"display={len(prompt_labels)} prompts -> prompt_similarity_by_game.csv, "
         f"full={len(full_prompt_labels)} prompts -> prompt_similarity_by_game_full.csv"
     )
+    if swiss_roll_demo.get("enabled"):
+        log(
+            "Swiss-roll demo: "
+            f"{len(swiss_roll_demo.get('samples', []))} points "
+            "(rendered in web UI under Swiss Roll Sanity Check)."
+        )
     log(f"Processed {len(valid_records)} images (skipped {len(skipped_images)} unreadable files).")
     return 0
 

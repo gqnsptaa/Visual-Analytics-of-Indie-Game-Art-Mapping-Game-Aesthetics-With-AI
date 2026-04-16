@@ -104,6 +104,10 @@ body {
   gap: 10px;
 }
 
+.controls-row-compact {
+  gap: 8px;
+}
+
 .btn,
 .file-label {
   border: 1px solid transparent;
@@ -140,10 +144,34 @@ body {
 #gameFilter,
 #groupFilter,
 #igdbSearchInput,
+#igdbCompanyInput,
 #igdbSearchResults,
+#igdbSearchLimit,
 #igdbSearchGroup,
 #igdbBulkListInput {
   width: min(100%, 420px);
+  min-width: 0;
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  padding: 8px;
+  font: inherit;
+  background: #fff;
+}
+
+#groupFocusSelect {
+  width: min(100%, 200px);
+  min-width: 0;
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  padding: 8px;
+  font: inherit;
+  background: #fff;
+}
+
+#vizSampleSizeSelect {
+  width: min(100%, 260px);
   min-width: 0;
   max-width: 100%;
   border-radius: 10px;
@@ -157,8 +185,16 @@ body {
   width: min(100%, 280px);
 }
 
+#igdbCompanyInput {
+  width: min(100%, 220px);
+}
+
 #igdbSearchResults {
   width: min(100%, 520px);
+}
+
+#igdbSearchLimit {
+  width: min(100%, 110px);
 }
 
 #igdbSearchGroup {
@@ -170,12 +206,54 @@ body {
   resize: vertical;
 }
 
+#datasetModeSelect {
+  width: min(100%, 310px);
+  min-width: 0;
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  padding: 8px;
+  font: inherit;
+  background: #fff;
+}
+
+.dataset-mode-hint {
+  color: var(--ink-muted);
+  font-size: 0.92rem;
+}
+
 #igdbPdfInput {
   width: min(100%, 360px);
 }
 
 .controls-row-list {
   align-items: flex-start;
+}
+
+.group-counters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.counter-pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.counter-indie {
+  color: #065f46;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.counter-aaa {
+  color: #9a3412;
+  background: rgba(249, 115, 22, 0.14);
 }
 
 .status {
@@ -192,6 +270,54 @@ body {
 
 .thesis-status {
   margin: 10px 0 12px;
+}
+
+.phase2-status {
+  margin: 10px 0 12px;
+}
+
+.phase3-status {
+  margin: 10px 0 12px;
+}
+
+.phase2-frames {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.phase2-frame-wrap {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 10px;
+}
+
+.phase2-frame-wrap h3 {
+  margin: 0 0 8px;
+  font-size: 0.98rem;
+  color: var(--ink);
+}
+
+.phase2-frame {
+  width: 100%;
+  height: min(78vw, 620px);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.phase2-link {
+  display: inline-block;
+  margin-top: 8px;
+  color: #0f766e;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.phase2-link:hover {
+  text-decoration: underline;
 }
 
 .metrics-grid {
@@ -360,6 +486,16 @@ h2 {
 
 .plot-short {
   height: 420px;
+}
+
+.plot-mini {
+  height: 340px;
+}
+
+.plot-grid-2 {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
 .js-plotly-plot,

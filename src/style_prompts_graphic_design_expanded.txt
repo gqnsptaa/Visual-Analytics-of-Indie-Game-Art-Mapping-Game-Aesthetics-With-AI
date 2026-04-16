@@ -1,108 +1,52 @@
-neon color palette
-pastel color palette
-monochrome color palette
-limited color palette
-high saturation colors
-low saturation colors
-desaturated tones
-vibrant colorful scene
-muted earthy colors
-warm color palette
-cool color palette
-dark color palette
-bright color palette
-retro color palette
-hand-painted color palette
-pixel art typography
-retro arcade font
-minimalist UI typography
-handwritten game font
-fantasy decorative typography
-sci-fi interface typography
-bold modern game typography
-clean minimalist interface
-diegetic game interface
-stylized fantasy UI
-cyberpunk interface typography
-ornamental fantasy lettering
-simple flat UI design
-high-tech HUD interface
-vintage arcade interface
-minimalist composition
-symmetrical composition
-asymmetrical composition
-centered character composition
-wide environmental composition
-dynamic action composition
-rule of thirds composition
-crowded visual composition
-open landscape composition
-tight interior composition
-foreground-background depth
-layered environment composition
-cinematic framing
-top-down game composition
+# High-Level Semantics
+hand-painted illustration style indie game
+mixed media game visuals experimental
+cel-shaded rendering stylized
+low poly aesthetic minimalist
+high fidelity 3D graphics AAA game
+realistic rendering with physically plausible materials
+photorealistic cinematic rendering
+abstract symbolic game art
+stylized rendering non-realistic
+net-art inspired internet collage aesthetic
+excessivist maximalist ornamented visual style
+
+# Lighting and Mood
+chiaroscuro lighting dramatic shadows
+low key lighting cinematic
+soft diffuse lighting environment
+neon lighting cyberpunk style
+global illumination realistic lighting
+flat lighting minimal shadows
+
+# Composition and Structure
+isometric game view
+top-down perspective game scene
 side-scrolling composition
-hand-painted textures
-photorealistic textures
-pixel textures
-low-detail textures
-high-detail textures
-gritty realistic textures
-smooth stylized textures
-procedural textures
-cartoon-like textures
-flat shaded surfaces
-painterly brush textures
-retro pixel textures
-soft watercolor textures
-rough material surfaces
-simplified texture style
-physically based rendering
-ray traced lighting
-cinematic lighting
-soft global illumination
-dramatic lighting
-cel shaded rendering
-flat shading rendering
-low poly rendering
-high polygon rendering
-stylized rendering
-realistic rendering
-cartoon rendering
-toon lighting
-volumetric lighting
-retro 3D rendering
-pixel art graphics
-low poly art style
-hand-drawn game art
-cartoon art style
-photorealistic graphics
-stylized fantasy art
-anime-inspired art style
-comic book art style
-retro arcade graphics
-minimalist art style
-surreal dreamlike art style
-dark fantasy art style
-bright colorful cartoon style
-indie experimental art style
-cinematic realistic art style
-cozy game atmosphere
-melancholic atmosphere
-dark mysterious atmosphere
-whimsical playful atmosphere
-peaceful relaxing environment
-tense dramatic mood
-dreamlike surreal mood
-nostalgic retro mood
-epic heroic atmosphere
-lonely desolate environment
-warm inviting environment
-eerie unsettling atmosphere
-magical fantasy atmosphere
-chaotic energetic scene
-calm contemplative environment
-Narrative-Driven Cover
-Symbolic-Driven Cover
-Multimodal Design
+symmetrical composition game scene
+dynamic action scene with motion blur
+negative space emphasis minimal composition
+minimalist composition clean layout
+dense cluttered environment high detail
+rayonism-inspired fragmented light-ray composition
+
+# Color and Texture
+muted color palette
+vibrant saturated colors
+monochrome palette
+pastel color scheme
+hand-painted textures visible brush strokes
+grainy textured surfaces rough detail
+
+# Typography and UI
+bold typography game UI
+minimal UI text design
+ornate fantasy typography
+experimental typography layout
+diegetic UI integrated into environment
+
+# Symbolism
+symbolic environmental storytelling
+metaphorical scene design
+abstract narrative visual elements
+sots-inspired symbolic ornamental fantasy art

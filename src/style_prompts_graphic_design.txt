@@ -1,21 +1,11 @@
-cinematic low-key lighting
-high-key soft diffuse lighting
-volumetric god rays
-hyper-realistic physically based 3D render
-stylized cel-shaded render
-flat geometric vector design
-isometric composition
-epic wide-angle composition
-symmetrical centered composition
-asymmetrical dynamic composition
-strong negative space
-complementary color contrast
-muted desaturated color palette
-neon cyberpunk color palette
-grainy lo-fi texture
-halftone print texture
-gothic ornamental art direction
-minimal diegetic UI
-Narrative-Driven Cover
-Symbolic-Driven Cover
-Multimodal Design
+# 10-prompt balanced set for Phase 3 comparison (10 vs 10 with affective prompts)
+cel-shaded rendering stylized
+low poly aesthetic minimalist
+realistic rendering with physically plausible materials
+photorealistic cinematic rendering
+rayonism-inspired fragmented light-ray composition
+net-art inspired internet collage aesthetic
+excessivist maximalist ornamented visual style
+sots-inspired symbolic ornamental fantasy art
+neon lighting cyberpunk style
+minimalist composition clean layout

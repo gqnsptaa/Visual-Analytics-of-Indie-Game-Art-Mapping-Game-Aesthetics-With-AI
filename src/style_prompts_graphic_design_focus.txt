@@ -1,27 +1,52 @@
-neon color palette
-pastel color palette
-monochrome color palette
-limited color palette
-warm color palette
-cool color palette
-dark color palette
-bright color palette
-pixel art typography
-minimalist UI typography
-diegetic game interface
-cyberpunk interface typography
-minimalist composition
-symmetrical composition
-asymmetrical composition
-dynamic action composition
-cinematic framing
-hand-painted textures
-photorealistic textures
-pixel textures
-painterly brush textures
-physically based rendering
-cel shaded rendering
-low poly rendering
-Narrative-Driven Cover
-Symbolic-Driven Cover
-Multimodal Design
+# High-Level Semantics
+hand-painted illustration style indie game
+mixed media game visuals experimental
+cel-shaded rendering stylized
+low poly aesthetic minimalist
+high fidelity 3D graphics AAA game
+realistic rendering with physically plausible materials
+photorealistic cinematic rendering
+abstract symbolic game art
+stylized rendering non-realistic
+net-art inspired internet collage aesthetic
+excessivist maximalist ornamented visual style
+
+# Lighting and Mood
+chiaroscuro lighting dramatic shadows
+low key lighting cinematic
+soft diffuse lighting environment
+neon lighting cyberpunk style
+global illumination realistic lighting
+flat lighting minimal shadows
+
+# Composition and Structure
+isometric game view
+top-down perspective game scene
+side-scrolling composition
+symmetrical composition game scene
+dynamic action scene with motion blur
+negative space emphasis minimal composition
+minimalist composition clean layout
+dense cluttered environment high detail
+rayonism-inspired fragmented light-ray composition
+
+# Color and Texture
+muted color palette
+vibrant saturated colors
+monochrome palette
+pastel color scheme
+hand-painted textures visible brush strokes
+grainy textured surfaces rough detail
+
+# Typography and UI
+bold typography game UI
+minimal UI text design
+ornate fantasy typography
+experimental typography layout
+diegetic UI integrated into environment
+
+# Symbolism
+symbolic environmental storytelling
+metaphorical scene design
+abstract narrative visual elements
+sots-inspired symbolic ornamental fantasy art

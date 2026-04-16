@@ -6,6 +6,7 @@ const state = {
   selectedGroups: new Set(),
   backendAvailable: false,
   statusPollTimerId: null,
+  phase3StatusPollTimerId: null,
   igdbAvailable: false,
   igdbStatusPollTimerId: null,
   igdbSearchResults: [],
@@ -21,6 +22,7 @@ const state = {
   },
   latestRadiusProjection: [],
   thesisData: null,
+  datasetMode: "full",
   analysisParams: {
     umapNNeighbors: 10,
     umapMinDist: 0.1,
@@ -31,18 +33,28 @@ const state = {
     nNearest: 5,
     useTsne: false,
   },
+  groupFocus: "both",
+  vizSampleSize: "all",
+  phase3LastData: null,
 };
 
 const els = {
   status: document.getElementById("status"),
   runAnalysisBtn: document.getElementById("runAnalysisBtn"),
+  datasetModeSelect: document.getElementById("datasetModeSelect"),
+  datasetModeHint: document.getElementById("datasetModeHint"),
+  groupFocusSelect: document.getElementById("groupFocusSelect"),
+  vizSampleSizeSelect: document.getElementById("vizSampleSizeSelect"),
   igdbDryRunBtn: document.getElementById("igdbDryRunBtn"),
   igdbFetchBtn: document.getElementById("igdbFetchBtn"),
   igdbSeedIndieBtn: document.getElementById("igdbSeedIndieBtn"),
   igdbSeedAaaBtn: document.getElementById("igdbSeedAaaBtn"),
   igdbSearchInput: document.getElementById("igdbSearchInput"),
   igdbCompanyInput: document.getElementById("igdbCompanyInput"),
+  igdbSearchLimit: document.getElementById("igdbSearchLimit"),
+  igdbHideExistingCheck: document.getElementById("igdbHideExistingCheck"),
   igdbSearchBtn: document.getElementById("igdbSearchBtn"),
+  igdbSelectAllBtn: document.getElementById("igdbSelectAllBtn"),
   igdbSearchResults: document.getElementById("igdbSearchResults"),
   igdbSearchGroup: document.getElementById("igdbSearchGroup"),
   igdbAddSelectedBtn: document.getElementById("igdbAddSelectedBtn"),
@@ -55,6 +67,8 @@ const els = {
   jsonFileInput: document.getElementById("jsonFileInput"),
   gameFilter: document.getElementById("gameFilter"),
   groupFilter: document.getElementById("groupFilter"),
+  indieCounter: document.getElementById("indieCounter"),
+  aaaCounter: document.getElementById("aaaCounter"),
   resetFiltersBtn: document.getElementById("resetFiltersBtn"),
   umapNeighborsInput: document.getElementById("umapNeighborsInput"),
   umapMinDistInput: document.getElementById("umapMinDistInput"),
@@ -79,18 +93,49 @@ const els = {
   radiusNNearestValue: document.getElementById("radiusNNearestValue"),
   tsnePlot: document.getElementById("tsnePlot"),
   umapPlot: document.getElementById("umapPlot"),
+  pcaPlot: document.getElementById("pcaPlot"),
+  swissRollOriginalPlot: document.getElementById("swissRollOriginalPlot"),
+  swissRollLlePlot: document.getElementById("swissRollLlePlot"),
+  swissRollPca2dPlot: document.getElementById("swissRollPca2dPlot"),
   centroidHeatmap: document.getElementById("centroidHeatmap"),
   groupCentroidHeatmap: document.getElementById("groupCentroidHeatmap"),
   promptHeatmap: document.getElementById("promptHeatmap"),
   promptGroupHeatmap: document.getElementById("promptGroupHeatmap"),
+  qualityTableBody: document.querySelector("#qualityTable tbody"),
   thesisStatus: document.getElementById("thesisStatus"),
   thesisMetrics: document.getElementById("thesisMetrics"),
   thesisImportancePlot: document.getElementById("thesisImportancePlot"),
   thesisStatsPlot: document.getElementById("thesisStatsPlot"),
   thesisTopFeaturesBody: document.querySelector("#thesisTopFeaturesTable tbody"),
-  clusterTableHead: document.querySelector("#clusterTable thead"),
-  clusterTableBody: document.querySelector("#clusterTable tbody"),
+  loadPhase2Btn: document.getElementById("loadPhase2Btn"),
+  phase2Status: document.getElementById("phase2Status"),
+  phase2SummaryBody: document.querySelector("#phase2SummaryTable tbody"),
+  phase2UmapFrame: document.getElementById("phase2UmapFrame"),
+  phase2DensmapFrame: document.getElementById("phase2DensmapFrame"),
+  phase2HistFrame: document.getElementById("phase2HistFrame"),
+  phase2UmapLink: document.getElementById("phase2UmapLink"),
+  phase2DensmapLink: document.getElementById("phase2DensmapLink"),
+  phase2HistLink: document.getElementById("phase2HistLink"),
+  phase2UmapTitle: document.getElementById("phase2UmapTitle"),
+  phase2DensmapTitle: document.getElementById("phase2DensmapTitle"),
+  phase2HistTitle: document.getElementById("phase2HistTitle"),
+  runPhase3Btn: document.getElementById("runPhase3Btn"),
+  loadPhase3Btn: document.getElementById("loadPhase3Btn"),
+  phase3Status: document.getElementById("phase3Status"),
+  phase3Metrics: document.getElementById("phase3Metrics"),
+  phase3LevelsBody: document.querySelector("#phase3LevelsTable tbody"),
+  phase3PcaFrame: document.getElementById("phase3PcaFrame"),
+  phase3KdeFrame: document.getElementById("phase3KdeFrame"),
+  phase3ResidualFrame: document.getElementById("phase3ResidualFrame"),
+  phase3CosineFrame: document.getElementById("phase3CosineFrame"),
+  phase3PromptFrame: document.getElementById("phase3PromptFrame"),
+  phase3PcaLink: document.getElementById("phase3PcaLink"),
+  phase3KdeLink: document.getElementById("phase3KdeLink"),
+  phase3ResidualLink: document.getElementById("phase3ResidualLink"),
+  phase3CosineLink: document.getElementById("phase3CosineLink"),
+  phase3PromptLink: document.getElementById("phase3PromptLink"),
   skippedTableBody: document.querySelector("#skippedTable tbody"),
+  outlierTableBody: document.querySelector("#outlierTable tbody"),
 };
 
 function setStatus(message, isError = false) {
@@ -168,6 +213,7 @@ function get2DPoints(samples, key) {
     x: Number(sample[key][0]),
     y: Number(sample[key][1]),
     label: sample.label,
+    group: normalizeGroupName(sample.group),
     thumbnail: sample.thumbnail || null,
   }));
 }
@@ -248,8 +294,8 @@ function getColorMap(games) {
 
 const GROUP_LEGEND_ORDER = ["indie", "aaa", "unassigned"];
 const GROUP_COLORS = {
-  indie: "#10b981",
-  aaa: "#f97316",
+  indie: "#00a86b",
+  aaa: "#ff6b00",
   unassigned: "#64748b",
 };
 
@@ -265,6 +311,18 @@ function formatGroupLabel(group) {
   if (key === "indie") return "Indie";
   if (key === "unassigned") return "Unassigned";
   return typeof group === "string" && group.trim() ? group.trim() : "Unassigned";
+}
+
+function normalizeGroupFocus(value) {
+  const key = String(value || "").trim().toLowerCase();
+  if (key === "indie" || key === "aaa") return key;
+  return "both";
+}
+
+function normalizeVizSampleSize(value) {
+  const key = String(value || "").trim().toLowerCase();
+  if (key === "500" || key === "1000") return key;
+  return "all";
 }
 
 function colorFromString(value) {
@@ -519,8 +577,8 @@ function clearThesisViews() {
   }
 }
 
-function appendMetricCard(label, value) {
-  if (!els.thesisMetrics) return;
+function appendMetricCardTo(container, label, value) {
+  if (!container) return;
   const card = document.createElement("div");
   card.className = "metric-card";
   const labelEl = document.createElement("span");
@@ -531,7 +589,12 @@ function appendMetricCard(label, value) {
   valueEl.textContent = value;
   card.appendChild(labelEl);
   card.appendChild(valueEl);
-  els.thesisMetrics.appendChild(card);
+  container.appendChild(card);
+}
+
+function appendMetricCard(label, value) {
+  if (!els.thesisMetrics) return;
+  appendMetricCardTo(els.thesisMetrics, label, value);
 }
 
 function renderThesisTopTable(statsRows) {
@@ -729,6 +792,388 @@ async function refreshThesisSection(showError = false) {
   }
 }
 
+function setPhase2Status(message, isError = false) {
+  if (!els.phase2Status) return;
+  els.phase2Status.textContent = message;
+  els.phase2Status.classList.toggle("error", isError);
+}
+
+function clearPhase2Section() {
+  if (els.phase2SummaryBody) {
+    els.phase2SummaryBody.innerHTML = "";
+  }
+  for (const frame of [els.phase2UmapFrame, els.phase2DensmapFrame, els.phase2HistFrame]) {
+    if (frame) {
+      frame.removeAttribute("src");
+    }
+  }
+  setPhase2Titles([]);
+}
+
+function normalizePhase2WebPath(value, fallbackPath) {
+  const raw = String(value || "").trim();
+  if (!raw) return fallbackPath;
+  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("/")) return raw;
+  if (raw.startsWith("web/")) return raw.slice(4);
+  return raw;
+}
+
+function setPhase2Frame(frameEl, linkEl, basePath, cacheBust = "") {
+  if (!frameEl || !linkEl) return;
+  const bust = cacheBust ? `?v=${encodeURIComponent(cacheBust)}` : "";
+  frameEl.src = `${basePath}${bust}`;
+  linkEl.href = basePath;
+}
+
+function setPhase2Titles(sampleSizes) {
+  const suffix = Array.isArray(sampleSizes) && sampleSizes.length > 0 ? ` (${sampleSizes.join(" / ")})` : "";
+  if (els.phase2UmapTitle) {
+    els.phase2UmapTitle.textContent = `UMAP Density Contours${suffix}`;
+  }
+  if (els.phase2DensmapTitle) {
+    els.phase2DensmapTitle.textContent = `densMAP Density Contours${suffix}`;
+  }
+  if (els.phase2HistTitle) {
+    els.phase2HistTitle.textContent = `Distance-to-Centroid Histograms${suffix}`;
+  }
+}
+
+function renderPhase2SummaryRows(rows) {
+  if (!els.phase2SummaryBody) return;
+  els.phase2SummaryBody.innerHTML = "";
+  const dataRows = Array.isArray(rows) ? rows : [];
+  if (!dataRows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.textContent = "No phase-2 summary rows available.";
+    tr.appendChild(td);
+    els.phase2SummaryBody.appendChild(tr);
+    return;
+  }
+
+  for (const row of dataRows) {
+    const tr = document.createElement("tr");
+    const values = [
+      String(row.sample_size ?? "n/a"),
+      formatMetricValue(row.aaa_mean, 4),
+      formatMetricValue(row.indie_mean, 4),
+      formatMetricValue(row.indie_vs_aaa_mean_ratio, 4),
+      formatMetricValue(row.mean_gap_indie_minus_aaa, 4),
+    ];
+    for (const value of values) {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    }
+    els.phase2SummaryBody.appendChild(tr);
+  }
+}
+
+async function loadPhase2Data() {
+  const report = await fetchOptionalJson([
+    "data/phase2_overlap/phase2_overlap_report.json",
+    "/data/phase2_overlap/phase2_overlap_report.json",
+  ]);
+  if (!report) return null;
+  const summaryRowsFromCsv = await fetchOptionalCsv([
+    "data/phase2_overlap/distance_to_centroid_summary.csv",
+    "/data/phase2_overlap/distance_to_centroid_summary.csv",
+  ]);
+  const summaryRows =
+    Array.isArray(summaryRowsFromCsv) && summaryRowsFromCsv.length > 0
+      ? summaryRowsFromCsv
+      : Array.isArray(report.summary_rows)
+        ? report.summary_rows
+        : [];
+
+  return {
+    report,
+    summaryRows,
+  };
+}
+
+function renderPhase2Section(phase2Data) {
+  if (!phase2Data || !phase2Data.report) {
+    clearPhase2Section();
+    setPhase2Status(
+      "Phase-2 outputs not found yet. Run: python src/phase2_overlap_density_analysis.py ...",
+      false
+    );
+    return;
+  }
+
+  const report = phase2Data.report;
+  renderPhase2SummaryRows(phase2Data.summaryRows);
+
+  const outputs = report.outputs || {};
+  const cacheToken = report.created_at_utc || String(Date.now());
+
+  setPhase2Frame(
+    els.phase2UmapFrame,
+    els.phase2UmapLink,
+    normalizePhase2WebPath(
+      outputs.umap_contour_html,
+      "data/phase2_overlap/umap_density_contours_500_1000_2000.html"
+    ),
+    cacheToken
+  );
+  setPhase2Frame(
+    els.phase2DensmapFrame,
+    els.phase2DensmapLink,
+    normalizePhase2WebPath(
+      outputs.densmap_contour_html,
+      "data/phase2_overlap/densmap_density_contours_500_1000_2000.html"
+    ),
+    cacheToken
+  );
+  setPhase2Frame(
+    els.phase2HistFrame,
+    els.phase2HistLink,
+    normalizePhase2WebPath(
+      outputs.distance_hist_html,
+      "data/phase2_overlap/distance_to_centroid_hist_500_1000_2000.html"
+    ),
+    cacheToken
+  );
+
+  const sampleSizesArray = Array.isArray(report.sample_sizes) ? report.sample_sizes : [];
+  setPhase2Titles(sampleSizesArray);
+  const sampleSizes = sampleSizesArray.length > 0 ? sampleSizesArray.join(", ") : "n/a";
+  setPhase2Status(`Loaded phase-2 overlap outputs for sample sizes: ${sampleSizes}.`);
+}
+
+async function refreshPhase2Section(showError = false) {
+  try {
+    const phase2Data = await loadPhase2Data();
+    renderPhase2Section(phase2Data);
+  } catch (err) {
+    clearPhase2Section();
+    const message = formatNetworkError(err, "Loading phase-2 outputs");
+    setPhase2Status(showError ? message : "Phase-2 outputs unavailable right now.", showError);
+  }
+}
+
+function setPhase3Status(message, isError = false) {
+  if (!els.phase3Status) return;
+  els.phase3Status.textContent = message;
+  els.phase3Status.classList.toggle("error", isError);
+}
+
+function clearPhase3Section() {
+  if (els.phase3Metrics) {
+    els.phase3Metrics.innerHTML = "";
+  }
+  if (els.phase3LevelsBody) {
+    els.phase3LevelsBody.innerHTML = "";
+  }
+  for (const frame of [
+    els.phase3PcaFrame,
+    els.phase3KdeFrame,
+    els.phase3ResidualFrame,
+    els.phase3CosineFrame,
+    els.phase3PromptFrame,
+  ]) {
+    if (frame) {
+      frame.removeAttribute("src");
+    }
+  }
+}
+
+function normalizePhase3WebPath(value, fallbackPath) {
+  const raw = String(value || "").trim();
+  if (!raw) return fallbackPath;
+  if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("/data/")) return raw;
+  if (raw.startsWith("data/")) return raw;
+  if (raw.startsWith("web/")) return raw.slice(4);
+  const webMarker = "/web/";
+  const idx = raw.lastIndexOf(webMarker);
+  if (idx !== -1) return raw.slice(idx + webMarker.length);
+  return fallbackPath;
+}
+
+function setPhase3Frame(frameEl, linkEl, basePath, cacheBust = "") {
+  if (!frameEl || !linkEl || !basePath) return;
+  const bust = cacheBust ? `?v=${encodeURIComponent(cacheBust)}` : "";
+  frameEl.src = `${basePath}${bust}`;
+  linkEl.href = basePath;
+}
+
+function renderPhase3LevelRows(rows) {
+  if (!els.phase3LevelsBody) return;
+  els.phase3LevelsBody.innerHTML = "";
+  const dataRows = Array.isArray(rows) ? rows : [];
+  if (!dataRows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 7;
+    td.textContent = "No phase-3 PCA-level rows available.";
+    tr.appendChild(td);
+    els.phase3LevelsBody.appendChild(tr);
+    return;
+  }
+
+  for (const row of dataRows) {
+    const tr = document.createElement("tr");
+    const values = [
+      String(row.level ?? "n/a"),
+      String(row.n_components ?? "n/a"),
+      formatMetricValue(row.logreg_auc, 4),
+      formatMetricValue(row.ari_mean, 4),
+      formatMetricValue(row.ari_std, 4),
+      formatMetricValue(row.cumulative_explained_variance, 4),
+      formatMetricValue(row.ovl_predicted_probability_by_group, 4),
+    ];
+    for (const value of values) {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    }
+    els.phase3LevelsBody.appendChild(tr);
+  }
+}
+
+function renderPhase3Metrics(report) {
+  if (!els.phase3Metrics) return;
+  els.phase3Metrics.innerHTML = "";
+  if (!report || typeof report !== "object") return;
+
+  const centroid = report.centroid_distance_summary || {};
+  const cosine = report.cosine_similarity_summary || {};
+  const prompt = report.prompt_style_summary || {};
+
+  appendMetricCardTo(els.phase3Metrics, "Sample Size", String(report.sample_size ?? "n/a"));
+  appendMetricCardTo(els.phase3Metrics, "Best Level by AUC", String(report.best_level_by_auc ?? "n/a"));
+  appendMetricCardTo(
+    els.phase3Metrics,
+    "Centroid OVL",
+    formatMetricValue(centroid.ovl_centroid_distance, 4)
+  );
+  appendMetricCardTo(
+    els.phase3Metrics,
+    "Indie/AAA Mean Dist Ratio",
+    formatMetricValue(centroid.indie_vs_aaa_ratio, 4)
+  );
+  appendMetricCardTo(
+    els.phase3Metrics,
+    "Mean Gap (Indie - AAA)",
+    formatMetricValue(centroid.mean_gap_indie_minus_aaa, 4)
+  );
+  appendMetricCardTo(
+    els.phase3Metrics,
+    "Cosine OVL (AAA vs Indie Within)",
+    formatMetricValue(cosine.ovl_aaa_vs_indie_within, 4)
+  );
+  appendMetricCardTo(
+    els.phase3Metrics,
+    "Prompt Styles",
+    `${String(prompt.style_a_name || "style_a")} vs ${String(prompt.style_b_name || "style_b")}`
+  );
+  appendMetricCardTo(
+    els.phase3Metrics,
+    "Prompt Delta Mean OVL",
+    formatMetricValue(prompt.delta_mean_styleA_minus_styleB?.ovl_aaa_vs_indie, 4)
+  );
+}
+
+async function loadPhase3Data() {
+  const report = await fetchOptionalJson([
+    "data/phase3_advanced/phase3_advanced_report.json",
+    "/data/phase3_advanced/phase3_advanced_report.json",
+  ]);
+  if (!report) return null;
+  const pcaRows = await fetchOptionalCsv([
+    "data/phase3_advanced/pca_level_metrics.csv",
+    "/data/phase3_advanced/pca_level_metrics.csv",
+  ]);
+  return {
+    report,
+    pcaRows: Array.isArray(pcaRows) ? pcaRows : [],
+  };
+}
+
+function renderPhase3Section(phase3Data) {
+  if (!phase3Data || !phase3Data.report) {
+    clearPhase3Section();
+    state.phase3LastData = null;
+    setPhase3Status(
+      "Phase-3 outputs not found yet. Run Phase 3 from this page or run src/phase3_advanced_separability_analysis.py.",
+      false
+    );
+    return;
+  }
+
+  const report = phase3Data.report;
+  state.phase3LastData = phase3Data;
+  renderPhase3Metrics(report);
+  renderPhase3LevelRows(phase3Data.pcaRows);
+
+  const outputs = report.outputs || {};
+  const cacheToken = report.created_at_utc || String(Date.now());
+
+  setPhase3Frame(
+    els.phase3PcaFrame,
+    els.phase3PcaLink,
+    normalizePhase3WebPath(outputs.pca_metrics_html, "data/phase3_advanced/pca_level_metrics.html"),
+    cacheToken
+  );
+  setPhase3Frame(
+    els.phase3KdeFrame,
+    els.phase3KdeLink,
+    normalizePhase3WebPath(outputs.kde_heatmap_html, "data/phase3_advanced/kde_heatmap_pca2.html"),
+    cacheToken
+  );
+  setPhase3Frame(
+    els.phase3ResidualFrame,
+    els.phase3ResidualLink,
+    normalizePhase3WebPath(outputs.residual_html, "data/phase3_advanced/residual_analysis.html"),
+    cacheToken
+  );
+  setPhase3Frame(
+    els.phase3CosineFrame,
+    els.phase3CosineLink,
+    normalizePhase3WebPath(outputs.cosine_html, "data/phase3_advanced/cosine_similarity_distributions.html"),
+    cacheToken
+  );
+  setPhase3Frame(
+    els.phase3PromptFrame,
+    els.phase3PromptLink,
+    normalizePhase3WebPath(outputs.prompt_html, "data/phase3_advanced/prompt_style_similarity_distributions.html"),
+    cacheToken
+  );
+
+  const updated = report.created_at_utc ? ` (updated: ${report.created_at_utc})` : "";
+  setPhase3Status(
+    `Loaded phase-3 outputs for sample size ${report.sample_size ?? "n/a"}; best level by AUC: ${report.best_level_by_auc ?? "n/a"}${updated}.`
+  );
+}
+
+async function refreshPhase3Section(showError = false) {
+  try {
+    const phase3Data = await loadPhase3Data();
+    renderPhase3Section(phase3Data);
+  } catch (err) {
+    clearPhase3Section();
+    state.phase3LastData = null;
+    const message = formatNetworkError(err, "Loading phase-3 outputs");
+    setPhase3Status(showError ? message : "Phase-3 outputs unavailable right now.", showError);
+  }
+}
+
+function getPhase3RunPayloadFromState() {
+  return {
+    dataset_mode: normalizeDatasetMode(state.datasetMode),
+    sample_size: 0,
+    batch_size: 32,
+    device: "auto",
+    clip_backend: "open_clip",
+    model_name: "ViT-B/32",
+    pca_levels: "2,5,10,25,50,100,200",
+    ari_seeds: "42,43,44",
+    max_pairs_per_bucket: 200000,
+  };
+}
+
 async function loadDefaultData() {
   setStatus("Loading default JSON (data/analysis_results.json)...");
   const candidates = ["data/analysis_results.json", "/data/analysis_results.json"];
@@ -789,6 +1234,14 @@ async function fetchBackendStatus() {
   return response.json();
 }
 
+async function fetchPhase3BackendStatus() {
+  const response = await fetch("/api/phase3-status", { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`Phase-3 status request failed: HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
 async function fetchIgdbBackendStatus() {
   const response = await fetch("/api/igdb-status", { cache: "no-store" });
   if (!response.ok) {
@@ -817,6 +1270,26 @@ async function runAnalysisFromBackend(runPayload) {
   return payload;
 }
 
+async function runPhase3FromBackend(runPayload) {
+  const response = await fetch("/api/run-phase3", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(runPayload || {}),
+  });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (_) {
+    payload = { ok: false, message: "Invalid server response." };
+  }
+
+  if (!response.ok) {
+    throw new Error(payload.message || `Phase-3 run request failed: HTTP ${response.status}`);
+  }
+  return payload;
+}
+
 async function runIgdbFetchFromBackend(runPayload) {
   const response = await fetch("/api/fetch-igdb-covers", {
     method: "POST",
@@ -837,7 +1310,7 @@ async function runIgdbFetchFromBackend(runPayload) {
   return payload;
 }
 
-async function searchIgdbGamesFromBackend(query, limit = 20, company = "") {
+async function searchIgdbGamesFromBackend(query, limit = 100, company = "") {
   const trimmedQuery = String(query || "").trim();
   const trimmedCompany = String(company || "").trim();
   const params = new URLSearchParams();
@@ -846,7 +1319,9 @@ async function searchIgdbGamesFromBackend(query, limit = 20, company = "") {
   if (![...params.keys()].length) {
     throw new Error("Provide a game title or company to search.");
   }
-  const encodedLimit = encodeURIComponent(String(limit));
+  const parsedLimit = Number.parseInt(String(limit), 10);
+  const boundedLimit = Number.isFinite(parsedLimit) ? clamp(parsedLimit, 1, 500) : 100;
+  const encodedLimit = encodeURIComponent(String(boundedLimit));
   const response = await fetch(`/api/igdb-search-games?${params.toString()}&limit=${encodedLimit}`, {
     cache: "no-store",
   });
@@ -883,6 +1358,13 @@ function stopStatusPolling() {
   }
 }
 
+function stopPhase3StatusPolling() {
+  if (state.phase3StatusPollTimerId !== null) {
+    clearInterval(state.phase3StatusPollTimerId);
+    state.phase3StatusPollTimerId = null;
+  }
+}
+
 function stopIgdbStatusPolling() {
   if (state.igdbStatusPollTimerId !== null) {
     clearInterval(state.igdbStatusPollTimerId);
@@ -894,6 +1376,15 @@ function setRunButtonBusy(isBusy) {
   if (!els.runAnalysisBtn) return;
   els.runAnalysisBtn.disabled = isBusy;
   els.runAnalysisBtn.textContent = isBusy ? "Running..." : "Run Analysis";
+}
+
+function setPhase3ButtonBusy(isBusy) {
+  if (!els.runPhase3Btn) return;
+  els.runPhase3Btn.disabled = isBusy || !state.backendAvailable;
+  els.runPhase3Btn.textContent = isBusy ? "Running Phase 3..." : "Run Phase 3";
+  if (els.loadPhase3Btn) {
+    els.loadPhase3Btn.disabled = isBusy;
+  }
 }
 
 function setIgdbButtonsBusy(isBusy) {
@@ -915,6 +1406,10 @@ function setIgdbButtonsBusy(isBusy) {
   }
   if (els.igdbSearchBtn) {
     els.igdbSearchBtn.disabled = isBusy || !state.igdbAvailable;
+  }
+  if (els.igdbSelectAllBtn) {
+    const hasResults = Boolean(els.igdbSearchResults && els.igdbSearchResults.options.length > 0);
+    els.igdbSelectAllBtn.disabled = isBusy || !state.igdbAvailable || !hasResults;
   }
   if (els.igdbAddSelectedBtn) {
     const hasSelection = getSelectedIgdbIds().length > 0;
@@ -942,17 +1437,25 @@ function renderIgdbSearchResults(results) {
   state.igdbSearchResults = Array.isArray(results) ? results : [];
   if (!els.igdbSearchResults) return;
   els.igdbSearchResults.innerHTML = "";
+  const hideExisting = Boolean(els.igdbHideExistingCheck && els.igdbHideExistingCheck.checked);
   for (const row of state.igdbSearchResults) {
     if (!row || !row.id || !row.name) continue;
+    const alreadyAdded = isGameAlreadyAdded(row.name);
+    if (hideExisting && alreadyAdded) continue;
     const yearPart = row.release_year ? ` (${row.release_year})` : "";
     const votePart = row.total_rating_count ? ` | votes ${row.total_rating_count}` : "";
+    const existingPart = alreadyAdded ? " | already added" : "";
     const option = document.createElement("option");
     option.value = String(row.id);
-    option.textContent = `${row.name}${yearPart}${votePart} [${row.id}]`;
+    option.textContent = `${row.name}${yearPart}${votePart}${existingPart} [${row.id}]`;
     els.igdbSearchResults.appendChild(option);
   }
   if (els.igdbSearchResults.options.length > 0) {
     els.igdbSearchResults.options[0].selected = true;
+  }
+  if (els.igdbSelectAllBtn) {
+    els.igdbSelectAllBtn.disabled =
+      !state.igdbAvailable || els.igdbSearchResults.options.length === 0;
   }
   if (els.igdbAddSelectedBtn) {
     els.igdbAddSelectedBtn.disabled =
@@ -1082,6 +1585,39 @@ function renderParamValues() {
   }
 }
 
+function normalizeDatasetMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  return mode === "demo" ? "demo" : "full";
+}
+
+function renderDatasetModeUi(statusPayload = null) {
+  const modes = statusPayload && statusPayload.dataset_modes ? statusPayload.dataset_modes : null;
+  const hasAvailabilityInfo = Boolean(modes) && typeof modes.demo_available === "boolean";
+  const demoAvailable = hasAvailabilityInfo ? Boolean(modes.demo_available) : true;
+  if (els.datasetModeSelect) {
+    const demoOption = Array.from(els.datasetModeSelect.options).find((opt) => opt.value === "demo");
+    if (demoOption) {
+      // Only disable when backend explicitly reports availability=false.
+      // If availability info is missing (older server / stale response), keep option selectable.
+      demoOption.disabled = hasAvailabilityInfo ? !demoAvailable : false;
+    }
+    els.datasetModeSelect.value = state.datasetMode;
+  }
+  if (els.datasetModeHint) {
+    if (!modes) {
+      els.datasetModeHint.textContent = "Choose dataset for next analysis run (availability unknown).";
+      return;
+    }
+    if (state.datasetMode === "demo") {
+      els.datasetModeHint.textContent = demoAvailable
+        ? "Using demo dataset (100 AAA + 100 Indie)."
+        : "Demo dataset not found on server. Create it first or switch to full dataset.";
+      return;
+    }
+    els.datasetModeHint.textContent = "Using full dataset.";
+  }
+}
+
 function renderRadiusValues() {
   if (els.radiusExtentValue) {
     els.radiusExtentValue.textContent = `${state.radiusParams.extentPct}%`;
@@ -1122,6 +1658,7 @@ function getRunPayloadFromState() {
     umap_n_neighbors: state.analysisParams.umapNNeighbors,
     umap_min_dist: state.analysisParams.umapMinDist,
     tsne_perplexity: state.analysisParams.tsnePerplexity,
+    dataset_mode: normalizeDatasetMode(state.datasetMode),
   };
 }
 
@@ -1160,12 +1697,14 @@ function applyPreset(presetName) {
 async function pollAnalysisStatus() {
   try {
     const status = await fetchBackendStatus();
+    renderDatasetModeUi(status);
+    const runningMode = normalizeDatasetMode(status?.last_params?.dataset_mode);
     const tailLine = formatBackendTail(status);
 
     if (status.running) {
       const text = tailLine
-        ? `Analysis running... ${tailLine}`
-        : "Analysis running... processing screenshots and computing embeddings.";
+        ? `Analysis running (${runningMode})... ${tailLine}`
+        : `Analysis running (${runningMode})... processing screenshots and computing embeddings.`;
       setStatus(text);
       setRunButtonBusy(true);
       return;
@@ -1190,6 +1729,48 @@ async function pollAnalysisStatus() {
     stopStatusPolling();
     setRunButtonBusy(false);
     setStatus(formatNetworkError(err, "Status polling"), true);
+  }
+}
+
+async function pollPhase3Status() {
+  try {
+    const status = await fetchPhase3BackendStatus();
+    const runningMode = normalizeDatasetMode(status?.last_params?.dataset_mode);
+    const tailLine = formatBackendTail(status);
+
+    if (status.running) {
+      const text = tailLine
+        ? `Phase-3 running (${runningMode})... ${tailLine}`
+        : `Phase-3 running (${runningMode})... computing advanced separability outputs.`;
+      setStatus(text);
+      setPhase3Status(text);
+      setPhase3ButtonBusy(true);
+      return;
+    }
+
+    stopPhase3StatusPolling();
+    setPhase3ButtonBusy(false);
+
+    if (typeof status.last_exit_code === "number" && status.last_exit_code === 0) {
+      setPhase3Status("Phase-3 finished. Reloading phase-3 visualizations...");
+      await refreshPhase3Section(true);
+      setStatus("Phase-3 analysis finished and section refreshed.");
+      return;
+    }
+
+    if (typeof status.last_exit_code === "number") {
+      const errorText = tailLine || status.last_error || "Unknown phase-3 pipeline error.";
+      const msg = `Phase-3 failed (exit ${status.last_exit_code}): ${errorText}`;
+      setPhase3Status(msg, true);
+      setStatus(msg, true);
+      return;
+    }
+  } catch (err) {
+    stopPhase3StatusPolling();
+    setPhase3ButtonBusy(false);
+    const message = formatNetworkError(err, "Phase-3 status polling");
+    setPhase3Status(message, true);
+    setStatus(message, true);
   }
 }
 
@@ -1269,6 +1850,37 @@ function getSelectedGroupsFromUi() {
   return new Set([...els.groupFilter.selectedOptions].map((opt) => opt.value));
 }
 
+function countUniqueGamesByGroup(samples) {
+  const groups = new Map();
+  for (const sample of Array.isArray(samples) ? samples : []) {
+    const label = typeof sample?.label === "string" ? sample.label.trim() : "";
+    if (!label) continue;
+    const groupKey = normalizeGroupName(sample?.group);
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, new Set());
+    }
+    groups.get(groupKey).add(label);
+  }
+  return groups;
+}
+
+function updateGroupCounters(allSamples, visibleSamples) {
+  const totalByGroup = countUniqueGamesByGroup(allSamples);
+  const shownByGroup = countUniqueGamesByGroup(visibleSamples);
+
+  const indieTotal = totalByGroup.get("indie")?.size || 0;
+  const indieShown = shownByGroup.get("indie")?.size || 0;
+  const aaaTotal = totalByGroup.get("aaa")?.size || 0;
+  const aaaShown = shownByGroup.get("aaa")?.size || 0;
+
+  if (els.indieCounter) {
+    els.indieCounter.textContent = `Indie: ${indieTotal} (${indieShown} shown)`;
+  }
+  if (els.aaaCounter) {
+    els.aaaCounter.textContent = `AAA: ${aaaTotal} (${aaaShown} shown)`;
+  }
+}
+
 function filteredSamples() {
   if (!state.data) return [];
   const selected = state.selectedGames;
@@ -1281,36 +1893,126 @@ function filteredSamples() {
   });
 }
 
-function render3DScatter(container, samples, vectorKey, title, colorMap) {
+function applyVizSampleLimit(samples) {
+  const mode = normalizeVizSampleSize(state.vizSampleSize);
+  if (mode === "all") {
+    return samples;
+  }
+
+  const targetTotal = Number.parseInt(mode, 10);
+  if (!Number.isFinite(targetTotal) || targetTotal <= 0) {
+    return samples;
+  }
+  const targetPerGroup = Math.floor(targetTotal / 2);
+  if (targetPerGroup <= 0) {
+    return samples;
+  }
+
+  const indieRows = [];
+  const aaaRows = [];
+  for (const sample of samples) {
+    const group = normalizeGroupName(sample.group);
+    if (group === "indie") {
+      indieRows.push(sample);
+    } else if (group === "aaa") {
+      aaaRows.push(sample);
+    }
+  }
+  if (indieRows.length === 0 || aaaRows.length === 0) {
+    return samples;
+  }
+
+  const stableSortById = (a, b) => {
+    const ai = Number.isFinite(Number(a?.image_id)) ? Number(a.image_id) : Number.MAX_SAFE_INTEGER;
+    const bi = Number.isFinite(Number(b?.image_id)) ? Number(b.image_id) : Number.MAX_SAFE_INTEGER;
+    if (ai !== bi) return ai - bi;
+    return String(a?.label || "").localeCompare(String(b?.label || ""));
+  };
+  indieRows.sort(stableSortById);
+  aaaRows.sort(stableSortById);
+
+  const k = Math.min(targetPerGroup, indieRows.length, aaaRows.length);
+  if (k <= 0) return samples;
+
+  const subset = [...indieRows.slice(0, k), ...aaaRows.slice(0, k)];
+  subset.sort(stableSortById);
+  return subset;
+}
+
+function render3DScatter(container, samples, vectorKey, title, colorMap, clusterKey = "cluster_id", clusterLabel = "Cluster") {
+  if (!container || typeof window.Plotly === "undefined") return;
+  const activeFocus = normalizeGroupFocus(state.groupFocus);
   const grouped = new Map();
   for (const sample of samples) {
-    if (!grouped.has(sample.label)) grouped.set(sample.label, []);
-    grouped.get(sample.label).push(sample);
+    const vector = sample && sample[vectorKey];
+    if (!Array.isArray(vector) || vector.length !== 3) continue;
+    const groupKey = normalizeGroupName(sample.group);
+    if (!grouped.has(groupKey)) grouped.set(groupKey, []);
+    grouped.get(groupKey).push(sample);
+  }
+  if (grouped.size === 0) {
+    Plotly.purge(container);
+    return;
   }
 
   const traces = [];
-  for (const [label, points] of grouped.entries()) {
+  const orderedGroups = ["indie", "aaa", "unassigned"];
+  const sortedKeys = [...grouped.keys()].sort((a, b) => {
+    const ia = orderedGroups.indexOf(a);
+    const ib = orderedGroups.indexOf(b);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.localeCompare(b);
+  });
+  if (activeFocus !== "both") {
+    sortedKeys.sort((a, b) => {
+      const aw = a === activeFocus ? 1 : 0;
+      const bw = b === activeFocus ? 1 : 0;
+      return aw - bw;
+    });
+  }
+
+  for (const groupKey of sortedKeys) {
+    const points = grouped.get(groupKey) || [];
+    const groupLabel = formatGroupLabel(groupKey);
+    const markerColor = getGroupColor(groupKey);
+    const isFocused = activeFocus === "both" || groupKey === activeFocus;
+    const markerOpacity = isFocused ? 0.9 : 0.14;
+    const markerSize = isFocused ? 5.8 : 5.0;
     traces.push({
       type: "scatter3d",
       mode: "markers",
-      name: label,
+      name: groupLabel,
       x: points.map((p) => p[vectorKey][0]),
       y: points.map((p) => p[vectorKey][1]),
       z: points.map((p) => p[vectorKey][2]),
-      customdata: points.map((p) => [p.cluster_id ?? "N/A"]),
+      customdata: points.map((p) => [
+        p.label ?? "N/A",
+        formatGroupLabel(p.group),
+        p[clusterKey] ?? "N/A",
+        p.outlier_flag ? "yes" : "no",
+        Number.isFinite(Number(p.outlier_score)) ? Number(p.outlier_score) : null,
+      ]),
       hovertemplate:
-        "<b>%{fullData.name}</b><br>" +
+        "<b>Game: %{customdata[0]}</b><br>" +
+        "Group: %{customdata[1]}<br>" +
         `${vectorKey.toUpperCase()}: (%{x:.2f}, %{y:.2f}, %{z:.2f})<br>` +
-        "Cluster: %{customdata[0]}<extra></extra>",
+        `${clusterLabel}: %{customdata[2]}<br>` +
+        "Outlier Flag: %{customdata[3]}<br>" +
+        "Outlier Score: %{customdata[4]:.4f}<extra></extra>",
       marker: {
-        size: 4,
-        opacity: 0.82,
-        color: colorMap[label] || "#334155",
+        size: markerSize,
+        opacity: markerOpacity,
+        color: markerColor,
+        line: {
+          color: "#0f172a",
+          width: 0.45,
+        },
       },
     });
   }
 
-  const manyGames = grouped.size > 12;
   const layout = {
     title,
     margin: { l: 0, r: 0, t: 48, b: 0 },
@@ -1322,7 +2024,7 @@ function render3DScatter(container, samples, vectorKey, title, colorMap) {
       zaxis: { title: `${vectorKey.toUpperCase()}-3` },
       aspectmode: "data",
     },
-    showlegend: !manyGames,
+    showlegend: true,
     legend: { orientation: "h", y: -0.12 },
   };
 
@@ -1354,6 +2056,144 @@ function renderHeatmap(container, xLabels, yLabels, matrix, title) {
   };
 
   Plotly.react(container, [trace], layout, { responsive: true, displaylogo: false });
+}
+
+function purgeSwissRollPlots() {
+  if (typeof window.Plotly === "undefined") return;
+  for (const el of [els.swissRollOriginalPlot, els.swissRollLlePlot, els.swissRollPca2dPlot]) {
+    if (el) Plotly.purge(el);
+  }
+}
+
+function renderSwissRollScatter(container, samples, vectorKey, title) {
+  if (!container || typeof window.Plotly === "undefined") return;
+  if (!Array.isArray(samples) || samples.length === 0) {
+    Plotly.purge(container);
+    return;
+  }
+
+  const raw = samples
+    .map((sample) => ({
+      v: sample?.[vectorKey],
+      c: Number(sample?.color_value),
+    }))
+    .filter((p) => Array.isArray(p.v) && (p.v.length === 2 || p.v.length === 3) && Number.isFinite(p.c));
+  if (raw.length === 0) {
+    Plotly.purge(container);
+    return;
+  }
+  const dim = raw[0].v.length;
+  const points = raw
+    .map((p) => ({
+      x: Number(p.v[0]),
+      y: Number(p.v[1]),
+      z: dim === 3 ? Number(p.v[2]) : null,
+      c: p.c,
+    }))
+    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y) && (dim === 2 || Number.isFinite(p.z)));
+
+  if (points.length === 0) {
+    Plotly.purge(container);
+    return;
+  }
+
+  const commonMarker = {
+    size: dim === 3 ? 2.8 : 5.0,
+    opacity: 0.82,
+    color: points.map((p) => p.c),
+    colorscale: "Turbo",
+    colorbar: { title: "roll t" },
+  };
+
+  if (dim === 3) {
+    Plotly.react(
+      container,
+      [
+        {
+          type: "scatter3d",
+          mode: "markers",
+          x: points.map((p) => p.x),
+          y: points.map((p) => p.y),
+          z: points.map((p) => p.z),
+          marker: commonMarker,
+          hovertemplate: `${vectorKey.toUpperCase()}: (%{x:.2f}, %{y:.2f}, %{z:.2f})<extra></extra>`,
+        },
+      ],
+      {
+        title,
+        margin: { l: 0, r: 0, t: 42, b: 0 },
+        paper_bgcolor: "rgba(0,0,0,0)",
+        plot_bgcolor: "rgba(0,0,0,0)",
+        scene: {
+          xaxis: { title: `${vectorKey.toUpperCase()}-1` },
+          yaxis: { title: `${vectorKey.toUpperCase()}-2` },
+          zaxis: { title: `${vectorKey.toUpperCase()}-3` },
+          aspectmode: "data",
+        },
+        showlegend: false,
+      },
+      { responsive: true, displaylogo: false }
+    );
+    return;
+  }
+
+  Plotly.react(
+    container,
+    [
+      {
+        type: "scattergl",
+        mode: "markers",
+        x: points.map((p) => p.x),
+        y: points.map((p) => p.y),
+        marker: commonMarker,
+        hovertemplate: `${vectorKey.toUpperCase()}: (%{x:.2f}, %{y:.2f})<extra></extra>`,
+      },
+    ],
+    {
+      title,
+      margin: { l: 42, r: 20, t: 42, b: 42 },
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(0,0,0,0)",
+      xaxis: { title: `${vectorKey.toUpperCase()}-1` },
+      yaxis: { title: `${vectorKey.toUpperCase()}-2` },
+      showlegend: false,
+    },
+    { responsive: true, displaylogo: false }
+  );
+}
+
+function renderSwissRollSection(swissRollDemo) {
+  const isEnabled = Boolean(swissRollDemo && swissRollDemo.enabled);
+  const samples = isEnabled && Array.isArray(swissRollDemo.samples) ? swissRollDemo.samples : [];
+  if (!isEnabled || samples.length === 0) {
+    purgeSwissRollPlots();
+    return;
+  }
+
+  const lleMeta = swissRollDemo?.meta?.lle || {};
+  const pcaMeta = swissRollDemo?.meta?.pca || {};
+  const lleErr =
+    Number.isFinite(Number(lleMeta.reconstruction_error))
+      ? Number(lleMeta.reconstruction_error).toFixed(4)
+      : "n/a";
+  const pcaErr =
+    Number.isFinite(Number(pcaMeta.error))
+      ? Number(pcaMeta.error).toFixed(4)
+      : "n/a";
+
+  renderSwissRollScatter(els.swissRollOriginalPlot, samples, "original", "Swiss Roll Original");
+  renderSwissRollScatter(
+    els.swissRollLlePlot,
+    samples,
+    "lle_2d",
+    `Swiss Roll + LLE (2D) | reconstruction error=${lleErr}`
+  );
+  renderSwissRollScatter(
+    els.swissRollPca2dPlot,
+    samples,
+    "pca_2d",
+    `Swiss Roll + PCA (2D) | error=${pcaErr}`
+  );
 }
 
 function subsetSymmetricMatrix(labels, matrix, subsetLabels) {
@@ -1412,47 +2252,6 @@ function pickReadableCentroidGames(labels, samples, maxPerGroup = 5) {
   return chosen;
 }
 
-function renderClusterTable(crosstab) {
-  const games = Object.keys(crosstab || {}).sort((a, b) => a.localeCompare(b));
-  const clusterIds = uniqueSorted(games.flatMap((g) => Object.keys(crosstab[g] || {}))).sort(
-    (a, b) => Number(a) - Number(b)
-  );
-
-  if (games.length === 0 || clusterIds.length === 0) {
-    els.clusterTableHead.innerHTML = "";
-    els.clusterTableBody.innerHTML = "";
-    return;
-  }
-
-  els.clusterTableHead.innerHTML = "";
-  const headRow = document.createElement("tr");
-  const gameTh = document.createElement("th");
-  gameTh.textContent = "Game";
-  headRow.appendChild(gameTh);
-  for (const clusterId of clusterIds) {
-    const th = document.createElement("th");
-    th.textContent = `Cluster ${clusterId}`;
-    headRow.appendChild(th);
-  }
-  els.clusterTableHead.appendChild(headRow);
-
-  els.clusterTableBody.innerHTML = "";
-  for (const game of games) {
-    const row = document.createElement("tr");
-    const gameCell = document.createElement("td");
-    gameCell.textContent = game;
-    row.appendChild(gameCell);
-
-    for (const clusterId of clusterIds) {
-      const td = document.createElement("td");
-      td.textContent = String(crosstab[game][clusterId] || 0);
-      row.appendChild(td);
-    }
-
-    els.clusterTableBody.appendChild(row);
-  }
-}
-
 function renderSkippedTable(skippedImages) {
   const rows = Array.isArray(skippedImages) ? skippedImages : [];
   els.skippedTableBody.innerHTML = "";
@@ -1485,6 +2284,91 @@ function renderSkippedTable(skippedImages) {
     td.textContent = `Showing ${maxRows} of ${rows.length} skipped images.`;
     tr.appendChild(td);
     els.skippedTableBody.appendChild(tr);
+  }
+}
+
+function formatMetricNumber(value, digits = 4) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "n/a";
+  return n.toFixed(digits);
+}
+
+function renderQualityTable(quality) {
+  if (!els.qualityTableBody) return;
+  els.qualityTableBody.innerHTML = "";
+
+  const methods = quality && quality.methods && typeof quality.methods === "object" ? quality.methods : {};
+  const order = ["pca", "umap", "tsne"];
+  const rows = order.filter((name) => methods[name]).concat(Object.keys(methods).filter((name) => !order.includes(name)));
+
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.textContent = "No projection quality metrics available.";
+    tr.appendChild(td);
+    els.qualityTableBody.appendChild(tr);
+    return;
+  }
+
+  for (const methodName of rows) {
+    const row = methods[methodName] || {};
+    const tr = document.createElement("tr");
+    const values = [
+      methodName.toUpperCase(),
+      formatMetricNumber(row.trustworthiness),
+      formatMetricNumber(row.continuity_proxy),
+      formatMetricNumber(row.knn_overlap),
+      String(row.status || "n/a"),
+    ];
+    for (const value of values) {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    }
+    els.qualityTableBody.appendChild(tr);
+  }
+}
+
+function renderOutlierTable(outliersPayload) {
+  if (!els.outlierTableBody) return;
+  els.outlierTableBody.innerHTML = "";
+
+  const rows =
+    outliersPayload &&
+    Array.isArray(outliersPayload.rows)
+      ? outliersPayload.rows
+      : [];
+
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 8;
+    td.textContent = "No outlier rows available.";
+    tr.appendChild(td);
+    els.outlierTableBody.appendChild(tr);
+    return;
+  }
+
+  const maxRows = 120;
+  for (const rowData of rows.slice(0, maxRows)) {
+    const tr = document.createElement("tr");
+    const values = [
+      rowData.rank ?? "",
+      rowData.image_id ?? "",
+      rowData.label ?? "",
+      rowData.group ?? "",
+      formatMetricNumber(rowData.outlier_score, 5),
+      formatMetricNumber(rowData.outlier_percentile, 4),
+      rowData.dbscan_noise ? "yes" : "no",
+      rowData.flagged ? "yes" : "no",
+    ];
+    for (const value of values) {
+      const td = document.createElement("td");
+      td.textContent = String(value);
+      tr.appendChild(td);
+    }
+    els.outlierTableBody.appendChild(tr);
   }
 }
 
@@ -1576,7 +2460,7 @@ function drawNeighborhoodExplorer(samples, colorMap) {
   for (const p of projected) {
     ctx.beginPath();
     ctx.arc(p.px, p.py, 4.2, 0, Math.PI * 2);
-    ctx.fillStyle = colorMap[p.label] || "#1d4ed8";
+    ctx.fillStyle = getGroupColor(p.group);
     ctx.fill();
   }
 
@@ -1935,7 +2819,7 @@ function renderCanvasVisuals(samples, colorMap) {
   state.latestCanvasRender.samples = samples;
   state.latestCanvasRender.colorMap = colorMap;
   drawNeighborhoodExplorer(samples, colorMap);
-  renderGameLegend(els.radiusLegend, samples, colorMap);
+  renderGroupLegend(els.radiusLegend, samples);
   renderImage3DMaps(samples, colorMap);
 }
 
@@ -1943,7 +2827,9 @@ function renderAll() {
   forceHorizontalScrollReset();
   if (!state.data) return;
 
-  const selectedSamples = filteredSamples();
+  const filtered = filteredSamples();
+  const selectedSamples = applyVizSampleLimit(filtered);
+  updateGroupCounters(state.data.samples, selectedSamples);
   const total = state.data.samples.length;
   updateRadiusControlBounds(selectedSamples.length);
 
@@ -1951,10 +2837,16 @@ function renderAll() {
     setStatus("No samples match current game/group filters. Select at least one game and one group.", true);
     Plotly.purge(els.tsnePlot);
     Plotly.purge(els.umapPlot);
+    if (els.pcaPlot) {
+      Plotly.purge(els.pcaPlot);
+    }
     Plotly.purge(els.centroidHeatmap);
     Plotly.purge(els.groupCentroidHeatmap);
     Plotly.purge(els.promptHeatmap);
     Plotly.purge(els.promptGroupHeatmap);
+    purgeSwissRollPlots();
+    renderQualityTable(null);
+    renderOutlierTable(null);
     renderCanvasVisuals([], {});
     return;
   }
@@ -1964,6 +2856,15 @@ function renderAll() {
 
   render3DScatter(els.tsnePlot, selectedSamples, "tsne", `3D t-SNE (${selectedSamples.length}/${total} samples)`, colorMap);
   render3DScatter(els.umapPlot, selectedSamples, "umap", `3D UMAP (${selectedSamples.length}/${total} samples)`, colorMap);
+  render3DScatter(
+    els.pcaPlot,
+    selectedSamples,
+    "pca",
+    `3D PCA (${selectedSamples.length}/${total} samples)`,
+    colorMap,
+    "dbscan_cluster_id",
+    "DBSCAN"
+  );
 
   const centroid = state.data.centroid_similarity;
   if (centroid && Array.isArray(centroid.labels) && Array.isArray(centroid.matrix)) {
@@ -2042,8 +2943,10 @@ function renderAll() {
     Plotly.purge(els.promptGroupHeatmap);
   }
 
-  renderClusterTable(state.data.clusters?.crosstab || {});
   renderSkippedTable(state.data.skipped_images || []);
+  renderQualityTable(state.data.projection_quality || null);
+  renderOutlierTable(state.data.outliers || null);
+  renderSwissRollSection(state.data.swiss_roll_demo || null);
   renderCanvasVisuals(selectedSamples, colorMap);
 
   const meta = state.data.meta || {};
@@ -2055,7 +2958,9 @@ function renderAll() {
   ).size;
   setStatus(
     `Loaded ${meta.valid_images ?? total} samples across ${meta.num_games ?? allGames.length} games and ${meta.num_groups ?? groupCount} groups. ` +
-      `t-SNE=${runtime.tsne?.method || "unknown"}, UMAP=${runtime.umap?.method || "unknown"}.`
+      `3D view using ${selectedSamples.length}/${filtered.length} filtered samples (mode=${normalizeVizSampleSize(state.vizSampleSize)}). ` +
+      `t-SNE=${runtime.tsne?.method || "unknown"}, UMAP=${runtime.umap?.method || "unknown"}, ` +
+      `PCA=${runtime.pca?.method || "unknown"}, DBSCAN=${runtime.dbscan?.status || "unknown"}.`
   );
 }
 
@@ -2082,6 +2987,8 @@ async function applyData(rawData) {
   populateGroupFilter(groups);
   renderAll();
   await refreshThesisSection(false);
+  await refreshPhase2Section(false);
+  await refreshPhase3Section(false);
 }
 
 async function onRunAnalysisClick() {
@@ -2096,8 +3003,9 @@ async function onRunAnalysisClick() {
   try {
     setRunButtonBusy(true);
     const runPayload = getRunPayloadFromState();
+    const modeLabel = normalizeDatasetMode(runPayload.dataset_mode);
     setStatus(
-      `Starting analysis with n_neighbors=${runPayload.umap_n_neighbors}, ` +
+      `Starting ${modeLabel} analysis with n_neighbors=${runPayload.umap_n_neighbors}, ` +
         `min_dist=${Number(runPayload.umap_min_dist).toFixed(2)}, ` +
         `perplexity=${runPayload.tsne_perplexity}...`
     );
@@ -2114,6 +3022,46 @@ async function onRunAnalysisClick() {
     setRunButtonBusy(false);
     setStatus(formatNetworkError(err, "Run analysis"), true);
   }
+}
+
+async function onRunPhase3Click() {
+  if (!state.backendAvailable) {
+    const message =
+      "Run Phase 3 is available only when using the backend server: python src/local_app_server.py";
+    setStatus(message, true);
+    setPhase3Status(message, true);
+    return;
+  }
+
+  try {
+    setPhase3ButtonBusy(true);
+    const runPayload = getPhase3RunPayloadFromState();
+    const modeLabel = normalizeDatasetMode(runPayload.dataset_mode);
+    const kickoffMessage = `Starting Phase-3 analysis (${modeLabel}) with full advanced metrics...`;
+    setStatus(kickoffMessage);
+    setPhase3Status(kickoffMessage);
+    const payload = await runPhase3FromBackend(runPayload);
+    const responseMessage = payload.message || "Phase-3 analysis started.";
+    setStatus(responseMessage);
+    setPhase3Status(responseMessage);
+
+    stopPhase3StatusPolling();
+    state.phase3StatusPollTimerId = setInterval(() => {
+      pollPhase3Status();
+    }, 1600);
+    pollPhase3Status();
+  } catch (err) {
+    setPhase3ButtonBusy(false);
+    const message = formatNetworkError(err, "Run phase-3 analysis");
+    setStatus(message, true);
+    setPhase3Status(message, true);
+  }
+}
+
+function onDatasetModeChange() {
+  if (!els.datasetModeSelect) return;
+  state.datasetMode = normalizeDatasetMode(els.datasetModeSelect.value);
+  renderDatasetModeUi();
 }
 
 async function startIgdbFetch(dryRun, extraPayload = null) {
@@ -2197,6 +3145,9 @@ async function onIgdbSearchClick() {
   }
   const query = els.igdbSearchInput ? String(els.igdbSearchInput.value || "").trim() : "";
   const company = els.igdbCompanyInput ? String(els.igdbCompanyInput.value || "").trim() : "";
+  const limit = els.igdbSearchLimit
+    ? clamp(Number.parseInt(String(els.igdbSearchLimit.value || "100"), 10) || 100, 1, 500)
+    : 100;
   if (!query && !company) {
     setStatus("Type a game title or company (or both) to search IGDB.", true);
     return;
@@ -2210,6 +3161,7 @@ async function onIgdbSearchClick() {
     return;
   }
   try {
+    await refreshExistingFolderKeys();
     const searchLabel =
       query && company
         ? `title "${query}" in company "${company}"`
@@ -2221,13 +3173,22 @@ async function onIgdbSearchClick() {
       els.igdbSearchBtn.disabled = true;
       els.igdbSearchBtn.textContent = "Searching...";
     }
-    const payload = await searchIgdbGamesFromBackend(query, 20, company);
+    if (els.igdbSelectAllBtn) {
+      els.igdbSelectAllBtn.disabled = true;
+    }
+    const payload = await searchIgdbGamesFromBackend(query, limit, company);
     const results = Array.isArray(payload.results) ? payload.results : [];
     renderIgdbSearchResults(results);
+    const existingCount = results.filter((row) => row && row.name && isGameAlreadyAdded(row.name)).length;
+    const shownCount = els.igdbSearchResults ? els.igdbSearchResults.options.length : results.length;
+    const hideExisting = Boolean(els.igdbHideExistingCheck && els.igdbHideExistingCheck.checked);
     if (results.length === 0) {
       setStatus(`Found 0 IGDB matches for ${searchLabel}. Try broader terms.`, true);
     } else {
-      setStatus(`Found ${results.length} IGDB matches for ${searchLabel}.`);
+      const hiddenPart =
+        hideExisting && existingCount > 0 ? ` (${shownCount} shown, ${existingCount} hidden as already added)` : "";
+      const existingPart = existingCount > 0 ? ` (${existingCount} already added)` : "";
+      setStatus(`Found ${results.length} IGDB matches for ${searchLabel}.${hiddenPart || existingPart}`);
     }
   } catch (err) {
     setStatus(formatNetworkError(err, "IGDB search"), true);
@@ -2236,6 +3197,10 @@ async function onIgdbSearchClick() {
       els.igdbSearchBtn.disabled = !state.igdbAvailable;
       els.igdbSearchBtn.textContent = "Search";
     }
+    if (els.igdbSelectAllBtn && els.igdbSearchResults) {
+      els.igdbSelectAllBtn.disabled =
+        !state.igdbAvailable || els.igdbSearchResults.options.length === 0;
+    }
   }
 }
 
@@ -2243,6 +3208,25 @@ function onIgdbSearchSelectionChange() {
   if (!els.igdbAddSelectedBtn || !els.igdbSearchResults) return;
   const hasSelection = getSelectedIgdbIds().length > 0;
   els.igdbAddSelectedBtn.disabled = !state.igdbAvailable || !hasSelection;
+}
+
+function onIgdbHideExistingToggle() {
+  renderIgdbSearchResults(state.igdbSearchResults);
+  onIgdbSearchSelectionChange();
+}
+
+function onIgdbSelectAllClick() {
+  if (!els.igdbSearchResults) return;
+  const options = Array.from(els.igdbSearchResults.options || []);
+  if (options.length === 0) {
+    setStatus("No IGDB results to select yet.", true);
+    return;
+  }
+  for (const option of options) {
+    option.selected = true;
+  }
+  onIgdbSearchSelectionChange();
+  setStatus(`Selected all ${options.length} visible search results.`);
 }
 
 function onIgdbBulkListInputChange() {
@@ -2476,6 +3460,18 @@ function onParamInputChange() {
   renderParamValues();
 }
 
+function onGroupFocusChanged() {
+  state.groupFocus = normalizeGroupFocus(els.groupFocusSelect ? els.groupFocusSelect.value : "both");
+  renderAll();
+}
+
+function onVizSampleSizeChanged() {
+  state.vizSampleSize = normalizeVizSampleSize(
+    els.vizSampleSizeSelect ? els.vizSampleSizeSelect.value : "all"
+  );
+  renderAll();
+}
+
 function onRadiusInputChange() {
   if (els.radiusExtentInput) {
     state.radiusParams.extentPct = Number.parseInt(els.radiusExtentInput.value, 10) || 0;
@@ -2515,6 +3511,7 @@ function initImageMapViews() {
 async function initBackendAvailability() {
   if (
     !els.runAnalysisBtn &&
+    !els.runPhase3Btn &&
     !els.igdbDryRunBtn &&
     !els.igdbFetchBtn &&
     !els.igdbSeedIndieBtn &&
@@ -2523,12 +3520,29 @@ async function initBackendAvailability() {
     !els.igdbAddListBtn
   ) return;
   try {
-    const [status, igdbStatus] = await Promise.all([fetchBackendStatus(), fetchIgdbBackendStatus()]);
+    const [status, phase3Status, igdbStatus] = await Promise.all([
+      fetchBackendStatus(),
+      fetchPhase3BackendStatus(),
+      fetchIgdbBackendStatus(),
+    ]);
     state.backendAvailable = true;
     state.igdbAvailable = true;
+    if (status && status.last_params && status.last_params.dataset_mode) {
+      state.datasetMode = normalizeDatasetMode(status.last_params.dataset_mode);
+    }
+    renderDatasetModeUi(status);
     await refreshExistingFolderKeys();
     els.runAnalysisBtn.disabled = false;
     els.runAnalysisBtn.title = "Run CLIP pipeline and regenerate web/data outputs.";
+    if (els.runPhase3Btn) {
+      els.runPhase3Btn.disabled = false;
+      els.runPhase3Btn.title =
+        "Run advanced phase-3 analysis (OVL, ARI, KDE, residuals, cosine distributions, prompt-style comparisons).";
+    }
+    if (els.loadPhase3Btn) {
+      els.loadPhase3Btn.disabled = false;
+      els.loadPhase3Btn.title = "Load existing phase-3 advanced outputs from web/data/phase3_advanced.";
+    }
     if (els.igdbDryRunBtn) {
       els.igdbDryRunBtn.disabled = false;
       els.igdbDryRunBtn.title = "Resolve IGDB matches without downloading covers.";
@@ -2548,6 +3562,11 @@ async function initBackendAvailability() {
     if (els.igdbSearchBtn) {
       els.igdbSearchBtn.disabled = false;
       els.igdbSearchBtn.title = "Search IGDB by game title.";
+    }
+    if (els.igdbSelectAllBtn) {
+      const hasResults = Boolean(els.igdbSearchResults && els.igdbSearchResults.options.length > 0);
+      els.igdbSelectAllBtn.disabled = !hasResults;
+      els.igdbSelectAllBtn.title = "Select all visible IGDB search results.";
     }
     if (els.igdbAddSelectedBtn) {
       els.igdbAddSelectedBtn.disabled = true;
@@ -2582,11 +3601,30 @@ async function initBackendAvailability() {
       }, 1600);
       pollIgdbStatus();
     }
+    if (phase3Status.running) {
+      setPhase3ButtonBusy(true);
+      stopPhase3StatusPolling();
+      state.phase3StatusPollTimerId = setInterval(() => {
+        pollPhase3Status();
+      }, 1600);
+      pollPhase3Status();
+    } else {
+      setPhase3ButtonBusy(false);
+    }
   } catch (_) {
     state.backendAvailable = false;
     state.igdbAvailable = false;
     els.runAnalysisBtn.disabled = true;
     els.runAnalysisBtn.title = "Start backend server with: python src/local_app_server.py";
+    if (els.runPhase3Btn) {
+      els.runPhase3Btn.disabled = true;
+      els.runPhase3Btn.title = "Start backend server with: python src/local_app_server.py";
+      els.runPhase3Btn.textContent = "Run Phase 3";
+    }
+    if (els.loadPhase3Btn) {
+      els.loadPhase3Btn.disabled = false;
+      els.loadPhase3Btn.title = "Load existing phase-3 advanced outputs from web/data/phase3_advanced.";
+    }
     if (els.igdbDryRunBtn) {
       els.igdbDryRunBtn.disabled = true;
       els.igdbDryRunBtn.title = "Start backend server with: python src/local_app_server.py";
@@ -2607,6 +3645,10 @@ async function initBackendAvailability() {
       els.igdbSearchBtn.disabled = true;
       els.igdbSearchBtn.title = "Start backend server with: python src/local_app_server.py";
     }
+    if (els.igdbSelectAllBtn) {
+      els.igdbSelectAllBtn.disabled = true;
+      els.igdbSelectAllBtn.title = "Start backend server with: python src/local_app_server.py";
+    }
     if (els.igdbAddSelectedBtn) {
       els.igdbAddSelectedBtn.disabled = true;
       els.igdbAddSelectedBtn.title = "Start backend server with: python src/local_app_server.py";
@@ -2619,12 +3661,26 @@ async function initBackendAvailability() {
       els.igdbImportPdfBtn.disabled = true;
       els.igdbImportPdfBtn.title = "Start backend server with: python src/local_app_server.py";
     }
+    stopPhase3StatusPolling();
+    renderDatasetModeUi();
   }
 }
 
 function bindEvents() {
   if (els.runAnalysisBtn) {
     els.runAnalysisBtn.addEventListener("click", onRunAnalysisClick);
+  }
+  if (els.runPhase3Btn) {
+    els.runPhase3Btn.addEventListener("click", onRunPhase3Click);
+  }
+  if (els.datasetModeSelect) {
+    els.datasetModeSelect.addEventListener("change", onDatasetModeChange);
+  }
+  if (els.groupFocusSelect) {
+    els.groupFocusSelect.addEventListener("change", onGroupFocusChanged);
+  }
+  if (els.vizSampleSizeSelect) {
+    els.vizSampleSizeSelect.addEventListener("change", onVizSampleSizeChanged);
   }
   if (els.igdbDryRunBtn) {
     els.igdbDryRunBtn.addEventListener("click", onIgdbDryRunClick);
@@ -2640,6 +3696,9 @@ function bindEvents() {
   }
   if (els.igdbSearchBtn) {
     els.igdbSearchBtn.addEventListener("click", onIgdbSearchClick);
+  }
+  if (els.igdbSelectAllBtn) {
+    els.igdbSelectAllBtn.addEventListener("click", onIgdbSelectAllClick);
   }
   if (els.igdbSearchInput) {
     els.igdbSearchInput.addEventListener("keydown", (event) => {
@@ -2660,6 +3719,9 @@ function bindEvents() {
   if (els.igdbSearchResults) {
     els.igdbSearchResults.addEventListener("change", onIgdbSearchSelectionChange);
     els.igdbSearchResults.addEventListener("dblclick", onIgdbAddSelectedClick);
+  }
+  if (els.igdbHideExistingCheck) {
+    els.igdbHideExistingCheck.addEventListener("change", onIgdbHideExistingToggle);
   }
   if (els.igdbAddSelectedBtn) {
     els.igdbAddSelectedBtn.addEventListener("click", onIgdbAddSelectedClick);
@@ -2699,6 +3761,16 @@ function bindEvents() {
       refreshThesisSection(true);
     });
   }
+  if (els.loadPhase2Btn) {
+    els.loadPhase2Btn.addEventListener("click", () => {
+      refreshPhase2Section(true);
+    });
+  }
+  if (els.loadPhase3Btn) {
+    els.loadPhase3Btn.addEventListener("click", () => {
+      refreshPhase3Section(true);
+    });
+  }
   if (els.radiusCanvas) {
     els.radiusCanvas.addEventListener("pointermove", onRadiusCanvasPointerMove);
     els.radiusCanvas.addEventListener("pointerleave", onRadiusCanvasPointerLeave);
@@ -2732,9 +3804,17 @@ function boot() {
     }
     syncParamInputsFromState();
     syncRadiusInputsFromState();
+    renderDatasetModeUi();
+    if (els.groupFocusSelect) {
+      els.groupFocusSelect.value = normalizeGroupFocus(state.groupFocus);
+    }
+    if (els.vizSampleSizeSelect) {
+      els.vizSampleSizeSelect.value = normalizeVizSampleSize(state.vizSampleSize);
+    }
     initImageMapViews();
     bindEvents();
     initBackendAvailability();
+    refreshPhase3Section(false);
     onLoadDefaultClick();
     setTimeout(forceHorizontalScrollReset, 120);
     setTimeout(forceHorizontalScrollReset, 450);

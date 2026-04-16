@@ -10,10 +10,10 @@
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=20260306g" />
+    <link rel="stylesheet" href="styles.css?v=20260415a" />
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js" defer></script>
-    <script src="app.js?v=20260306g" defer></script>
+    <script src="app.js?v=20260415a" defer></script>
   </head>
   <body>
     <main class="app-shell">
@@ -37,6 +37,14 @@
           <input id="jsonFileInput" type="file" accept="application/json" />
           <button id="resetFiltersBtn" class="btn btn-muted">Reset Filters</button>
         </div>
+        <div class="controls-row controls-row-compact">
+          <label for="datasetModeSelect">Analysis Dataset</label>
+          <select id="datasetModeSelect">
+            <option value="full" selected>Full Dataset</option>
+            <option value="demo">Demo Dataset (100 AAA + 100 Indie)</option>
+          </select>
+          <span id="datasetModeHint" class="dataset-mode-hint">Using full dataset.</span>
+        </div>
 
         <div class="param-panel">
           <div class="param-item">
@@ -56,6 +64,20 @@
             <button id="presetBalancedBtn" class="btn btn-muted btn-small" type="button">Balanced</button>
             <button id="presetGlobalBtn" class="btn btn-muted btn-small" type="button">Global Structure</button>
           </div>
+          <div class="controls-row controls-row-compact">
+            <label for="groupFocusSelect">3D Group Focus</label>
+            <select id="groupFocusSelect">
+              <option value="both" selected>Show Both</option>
+              <option value="indie">Highlight Indie</option>
+              <option value="aaa">Highlight AAA</option>
+            </select>
+            <label for="vizSampleSizeSelect">3D Sample Size</label>
+            <select id="vizSampleSizeSelect">
+              <option value="all" selected>All Visible</option>
+              <option value="500">Balanced 500 (250+250)</option>
+              <option value="1000">Balanced 1000 (500+500)</option>
+            </select>
+          </div>
         </div>
 
         <div class="controls-row">
@@ -63,7 +85,22 @@
           <input id="igdbSearchInput" type="text" placeholder="e.g. Elden Ring" />
           <label for="igdbCompanyInput">Company</label>
           <input id="igdbCompanyInput" type="text" placeholder="e.g. Rockstar, Ubisoft" />
+          <label for="igdbSearchLimit">Max Results</label>
+          <select id="igdbSearchLimit">
+            <option value="20">20</option>
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="200">200</option>
+            <option value="300">300</option>
+            <option value="400">400</option>
+            <option value="500">500</option>
+          </select>
+          <label class="inline-check" for="igdbHideExistingCheck">
+            <input id="igdbHideExistingCheck" type="checkbox" />
+            Hide already added
+          </label>
           <button id="igdbSearchBtn" class="btn btn-muted" disabled>Search</button>
+          <button id="igdbSelectAllBtn" class="btn btn-muted" disabled>Select All Results</button>
           <select id="igdbSearchResults" size="4" multiple></select>
           <label for="igdbSearchGroup">Add To Group</label>
           <select id="igdbSearchGroup">
@@ -97,6 +134,10 @@ Hades"
         <div class="controls-row">
           <label for="groupFilter">Group Filter</label>
           <select id="groupFilter" multiple size="3"></select>
+        </div>
+        <div id="groupCounters" class="group-counters" aria-live="polite">
+          <span id="indieCounter" class="counter-pill counter-indie">Indie: 0 (0 shown)</span>
+          <span id="aaaCounter" class="counter-pill counter-aaa">AAA: 0 (0 shown)</span>
         </div>
 
         <div id="status" class="status" aria-live="polite">
@@ -177,6 +218,31 @@ Hades"
           <div id="umapPlot" class="plot"></div>
         </article>
       </section>
+      <section class="stack-1">
+        <article class="card">
+          <h2>3D PCA</h2>
+          <div id="pcaPlot" class="plot"></div>
+        </article>
+      </section>
+
+      <section class="card">
+        <h2>Embedding Quality (PCA vs UMAP vs t-SNE)</h2>
+        <p>Higher values are better for local-neighborhood preservation in projected space.</p>
+        <div class="table-wrap">
+          <table id="qualityTable">
+            <thead>
+              <tr>
+                <th>Method</th>
+                <th>Trustworthiness</th>
+                <th>Continuity Proxy</th>
+                <th>k-NN Overlap</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
 
       <section class="stack-1">
         <article class="card">
@@ -229,12 +295,185 @@ Hades"
       </section>
 
       <section class="card">
-        <h2>Cluster Cross-Tab</h2>
+        <h2>Swiss Roll Sanity Check</h2>
+        <p>Synthetic manifold benchmark to compare nonlinear LLE reduction vs linear PCA reduction.</p>
+        <div class="plot-grid-2">
+          <div id="swissRollOriginalPlot" class="plot plot-mini"></div>
+          <div id="swissRollLlePlot" class="plot plot-mini"></div>
+          <div id="swissRollPca2dPlot" class="plot plot-mini"></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Phase 2: Overlap & Distribution (UMAP + densMAP)</h2>
+        <div class="controls-row">
+          <button id="loadPhase2Btn" class="btn btn-muted btn-small" type="button">Load Phase 2 Results</button>
+        </div>
+        <p id="phase2Status" class="status phase2-status">Waiting for phase-2 overlap results...</p>
         <div class="table-wrap">
-          <table id="clusterTable">
-            <thead></thead>
+          <table id="phase2SummaryTable">
+            <thead>
+              <tr>
+                <th>Sample Size</th>
+                <th>AAA Mean Dist</th>
+                <th>Indie Mean Dist</th>
+                <th>Indie/AAA Ratio</th>
+                <th>Mean Gap (Indie - AAA)</th>
+              </tr>
+            </thead>
             <tbody></tbody>
           </table>
+        </div>
+        <div class="phase2-frames">
+          <article class="phase2-frame-wrap">
+            <h3 id="phase2UmapTitle">UMAP Density Contours</h3>
+            <iframe
+              id="phase2UmapFrame"
+              class="phase2-frame"
+              title="Phase 2 UMAP Density Contours"
+              loading="lazy"
+            ></iframe>
+            <a
+              id="phase2UmapLink"
+              class="phase2-link"
+              href="data/phase2_overlap/umap_density_contours_500_1000_2000.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Open UMAP in new tab</a
+            >
+          </article>
+          <article class="phase2-frame-wrap">
+            <h3 id="phase2DensmapTitle">densMAP Density Contours</h3>
+            <iframe
+              id="phase2DensmapFrame"
+              class="phase2-frame"
+              title="Phase 2 densMAP Density Contours"
+              loading="lazy"
+            ></iframe>
+            <a
+              id="phase2DensmapLink"
+              class="phase2-link"
+              href="data/phase2_overlap/densmap_density_contours_500_1000_2000.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Open densMAP in new tab</a
+            >
+          </article>
+          <article class="phase2-frame-wrap">
+            <h3 id="phase2HistTitle">Distance-to-Centroid Histograms</h3>
+            <iframe
+              id="phase2HistFrame"
+              class="phase2-frame"
+              title="Phase 2 Centroid Distance Histograms"
+              loading="lazy"
+            ></iframe>
+            <a
+              id="phase2HistLink"
+              class="phase2-link"
+              href="data/phase2_overlap/distance_to_centroid_hist_500_1000_2000.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Open histogram in new tab</a
+            >
+          </article>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Phase 3: Advanced Separability Analysis</h2>
+        <div class="controls-row">
+          <button id="runPhase3Btn" class="btn btn-small" type="button" disabled>Run Phase 3</button>
+          <button id="loadPhase3Btn" class="btn btn-muted btn-small" type="button">Load Phase 3 Results</button>
+        </div>
+        <p id="phase3Status" class="status phase3-status">Waiting for phase-3 advanced outputs...</p>
+        <div id="phase3Metrics" class="metrics-grid"></div>
+        <div class="table-wrap">
+          <table id="phase3LevelsTable">
+            <thead>
+              <tr>
+                <th>Level</th>
+                <th>Components</th>
+                <th>LogReg AUC</th>
+                <th>ARI Mean</th>
+                <th>ARI Std</th>
+                <th>Cum. Explained Variance</th>
+                <th>OVL Pred Prob</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="phase2-frames">
+          <article class="phase2-frame-wrap">
+            <h3>PCA-Level Metrics</h3>
+            <iframe id="phase3PcaFrame" class="phase2-frame" title="Phase 3 PCA Level Metrics" loading="lazy"></iframe>
+            <a
+              id="phase3PcaLink"
+              class="phase2-link"
+              href="data/phase3_advanced/pca_level_metrics.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Open PCA metrics in new tab</a
+            >
+          </article>
+          <article class="phase2-frame-wrap">
+            <h3>KDE Heatmap (PCA-2)</h3>
+            <iframe id="phase3KdeFrame" class="phase2-frame" title="Phase 3 KDE Heatmap" loading="lazy"></iframe>
+            <a
+              id="phase3KdeLink"
+              class="phase2-link"
+              href="data/phase3_advanced/kde_heatmap_pca2.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Open KDE heatmap in new tab</a
+            >
+          </article>
+          <article class="phase2-frame-wrap">
+            <h3>Residual Analysis</h3>
+            <iframe id="phase3ResidualFrame" class="phase2-frame" title="Phase 3 Residual Analysis" loading="lazy"></iframe>
+            <a
+              id="phase3ResidualLink"
+              class="phase2-link"
+              href="data/phase3_advanced/residual_analysis.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Open residual analysis in new tab</a
+            >
+          </article>
+          <article class="phase2-frame-wrap">
+            <h3>Cosine Similarity Distributions</h3>
+            <iframe
+              id="phase3CosineFrame"
+              class="phase2-frame"
+              title="Phase 3 Cosine Similarity Distributions"
+              loading="lazy"
+            ></iframe>
+            <a
+              id="phase3CosineLink"
+              class="phase2-link"
+              href="data/phase3_advanced/cosine_similarity_distributions.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Open cosine distributions in new tab</a
+            >
+          </article>
+          <article class="phase2-frame-wrap">
+            <h3>Prompt-Style Similarity Distributions</h3>
+            <iframe
+              id="phase3PromptFrame"
+              class="phase2-frame"
+              title="Phase 3 Prompt-Style Similarity Distributions"
+              loading="lazy"
+            ></iframe>
+            <a
+              id="phase3PromptLink"
+              class="phase2-link"
+              href="data/phase3_advanced/prompt_style_similarity_distributions.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Open prompt-style distributions in new tab</a
+            >
+          </article>
         </div>
       </section>
 
@@ -248,6 +487,28 @@ Hades"
                 <th>Game</th>
                 <th>Path</th>
                 <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Outlier Detection</h2>
+        <p>Top outliers by LOF score; DBSCAN noise points are marked separately.</p>
+        <div class="table-wrap">
+          <table id="outlierTable">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Image ID</th>
+                <th>Game</th>
+                <th>Group</th>
+                <th>Outlier Score</th>
+                <th>Percentile</th>
+                <th>DBSCAN Noise</th>
+                <th>Flagged</th>
               </tr>
             </thead>
             <tbody></tbody>

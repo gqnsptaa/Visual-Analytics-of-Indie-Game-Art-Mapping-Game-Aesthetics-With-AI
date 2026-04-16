@@ -28,7 +28,7 @@ The pipeline supports both OpenAI CLIP and OpenCLIP and auto-falls back.
 
 ## 2. Dataset Structure (Local Only)
 
-The script now reads screenshots from this fixed folder:
+By default, the script reads screenshots from:
 
 ```text
 /Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset/
@@ -40,6 +40,7 @@ The script now reads screenshots from this fixed folder:
 ```
 
 Use one folder per game. Folder names become labels in the analysis.
+You can override the dataset path with `--dataset-root`.
 
 ## 2.1 AAA vs Indie Group Mapping
 
@@ -185,14 +186,54 @@ Then export:
 export SSL_CERT_FILE="$(python -c 'import certifi; print(certifi.where())')"
 ```
 
+## 2.3 Fast Demo Dataset (100 AAA + 100 Indie)
+
+To build a lightweight dataset for quick prompt testing:
+
+```bash
+python src/create_demo_dataset.py \
+  --per-group 100 \
+  --images-per-game 1 \
+  --output-dataset-root /Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_demo_100x2
+```
+
+Then run analysis on the demo set:
+
+```bash
+python src/clip_indie_pipeline.py \
+  --dataset-root /Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_demo_100x2 \
+  --output-dir web/data
+```
+
 ## 3. Run Analysis
 
 ```bash
 python src/clip_indie_pipeline.py \
+  --dataset-root "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset" \
   --output-dir "web/data" \
   --batch-size 32 \
   --device auto \
   --clip-backend auto
+```
+
+New analysis outputs now include:
+- `3D PCA` projection for each image sample.
+- `DBSCAN` clustering (`dbscan_cluster_id` per sample + DBSCAN cross-tab table).
+- `Swiss Roll Sanity Check` synthetic benchmark (Original vs LLE-2D vs PCA-2D).
+- `Embedding quality` metrics per method (`trustworthiness`, `continuity proxy`, `k-NN overlap`).
+- `Outlier detection` (LOF score + DBSCAN noise flag, exported as `outlier_rows.csv`).
+
+Optional flags for these features:
+
+```bash
+python src/clip_indie_pipeline.py \
+  --output-dir "web/data" \
+  --dbscan-eps 0.14 \
+  --dbscan-min-samples 4 \
+  --dbscan-metric cosine \
+  --swiss-roll-samples 250 \
+  --swiss-roll-noise 0.03 \
+  --swiss-roll-lle-neighbors 12
 ```
 
 To use the graphic-design prompt set from file:
@@ -203,7 +244,7 @@ python src/clip_indie_pipeline.py \
   --style-prompts-file "src/style_prompts_graphic_design.txt"
 ```
 
-To use the expanded 108-prompt set while keeping UI heatmaps readable:
+To use the grouped 28-prompt set (same file for full + focused heatmaps):
 
 ```bash
 python src/clip_indie_pipeline.py \
@@ -215,6 +256,7 @@ python src/clip_indie_pipeline.py \
 `--prompt-focus-file` filters only the displayed/exported heatmap prompt matrices
 to a curated subset (default: `src/style_prompts_graphic_design_focus.txt`).
 The full prompt set is still scored and exported to `*_full.csv` + JSON `*_full` sections.
+Prompt files can include section headers/comments with `# ...`; those lines are ignored.
 
 To use your fine-tuned style adapter checkpoint for the heatmap/scores:
 
@@ -258,6 +300,7 @@ If `src/style_prompts_graphic_design_expanded.txt` and
 
 From the page you can now click:
 - `Run Analysis` to execute the full Python pipeline.
+- Choose `Analysis Dataset` (`Full Dataset` or `Demo Dataset`) before clicking `Run Analysis`.
 - `IGDB Dry Run` to test IGDB matching without downloading files.
 - `Fetch IGDB Covers` to download matched covers into game folders.
 - `Add Indie Games` to auto-create 30 new Indie game folders from IGDB and fetch their covers.

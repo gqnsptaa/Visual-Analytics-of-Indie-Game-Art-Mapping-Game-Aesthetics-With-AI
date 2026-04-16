@@ -1,0 +1,159 @@
+{
+  "created_at": "2026-03-20T13:54:14.179658",
+  "batch": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414",
+  "moved_count": 19,
+  "kept_different_cover_count": 9,
+  "moved": [
+    {
+      "folder": "Arma 3 Creator DLC - CSLA Iron Curtain",
+      "reason": "dlc",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Arma 3 Creator DLC - CSLA Iron Curtain"
+    },
+    {
+      "folder": "Arma 3 Creator DLC - Reaction Forces",
+      "reason": "dlc",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Arma 3 Creator DLC - Reaction Forces"
+    },
+    {
+      "folder": "Arma 3 Creator DLC - Spearhead 1944",
+      "reason": "dlc",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Arma 3 Creator DLC - Spearhead 1944"
+    },
+    {
+      "folder": "Arma 3 Creator DLC Global Mobilization - Cold War Germany",
+      "reason": "dlc",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Arma 3 Creator DLC Global Mobilization - Cold War Germany"
+    },
+    {
+      "folder": "Arma 3 Creator DLC S.O.G. Prairie Fire",
+      "reason": "dlc",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Arma 3 Creator DLC S.O.G. Prairie Fire"
+    },
+    {
+      "folder": "Arma 3 Creator DLC Western Sahara",
+      "reason": "dlc",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Arma 3 Creator DLC Western Sahara"
+    },
+    {
+      "folder": "Baldur's Gate 3 Deluxe Edition",
+      "reason": "deluxe_or_premium_no_regular_match",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Baldur's Gate 3 Deluxe Edition"
+    },
+    {
+      "folder": "Chameleon Run Deluxe Edition",
+      "reason": "deluxe_or_premium_no_regular_match",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Chameleon Run Deluxe Edition"
+    },
+    {
+      "folder": "Defense Grid The Awakening - You Monster DLC",
+      "reason": "dlc",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Defense Grid The Awakening - You Monster DLC"
+    },
+    {
+      "folder": "Dungeon Defenders New Heroes DLC",
+      "reason": "dlc",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Dungeon Defenders New Heroes DLC"
+    },
+    {
+      "folder": "Dungeon Defenders Warden Hero DLC",
+      "reason": "dlc",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Dungeon Defenders Warden Hero DLC"
+    },
+    {
+      "folder": "Forza Horizon 2 Porsche Expansion",
+      "reason": "dlc",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Forza Horizon 2 Porsche Expansion"
+    },
+    {
+      "folder": "Mighty No. 9 Ray Expansion",
+      "reason": "dlc",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Mighty No. 9 Ray Expansion"
+    },
+    {
+      "folder": "Mimpi Dreams Mars DLC",
+      "reason": "dlc",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Mimpi Dreams Mars DLC"
+    },
+    {
+      "folder": "Pathologic 2 + Marble Nest DLC Bundle",
+      "reason": "dlc",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Pathologic 2 + Marble Nest DLC Bundle"
+    },
+    {
+      "folder": "Sonic & All-Stars Racing Transformed Metal Sonic & Outrun DLC",
+      "reason": "dlc",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Sonic & All-Stars Racing Transformed Metal Sonic & Outrun DLC"
+    },
+    {
+      "folder": "Sonic & All-Stars Racing Transformed Ryo Hazuki DLC",
+      "reason": "dlc",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Sonic & All-Stars Racing Transformed Ryo Hazuki DLC"
+    },
+    {
+      "folder": "Sonic & All-Stars Racing Transformed Yogscast DLC",
+      "reason": "dlc",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/Sonic & All-Stars Racing Transformed Yogscast DLC"
+    },
+    {
+      "folder": "The Falconeer Deluxe Edition",
+      "reason": "deluxe_or_premium_no_regular_match",
+      "moved_to": "/Users/gqnsptaa/Desktop/Codex_Project/indie_games_dataset_holdout/dlc_deluxe_premium_cleanup_20260320_135414/The Falconeer Deluxe Edition"
+    }
+  ],
+  "kept_different_cover": [
+    {
+      "folder": "Assassin's Creed Origins - Deluxe Edition",
+      "regular": "Assassin's Creed Origins",
+      "dhash_distance": 16,
+      "reason": "different_cover_keep"
+    },
+    {
+      "folder": "Disciples Liberation - Deluxe Edition",
+      "regular": "Disciples Liberation",
+      "dhash_distance": 14,
+      "reason": "different_cover_keep"
+    },
+    {
+      "folder": "Disciples Liberation - Digital Deluxe Edition",
+      "regular": "Disciples Liberation",
+      "dhash_distance": 36,
+      "reason": "different_cover_keep"
+    },
+    {
+      "folder": "Galak-Z The Void - Deluxe Edition",
+      "regular": "Galak-Z The Void",
+      "dhash_distance": 34,
+      "reason": "different_cover_keep"
+    },
+    {
+      "folder": "Gotham Knights Deluxe Edition",
+      "regular": "Gotham Knights",
+      "dhash_distance": 29,
+      "reason": "different_cover_keep"
+    },
+    {
+      "folder": "Sherlock Holmes Chapter One - Deluxe Edition",
+      "regular": "Sherlock Holmes Chapter One",
+      "dhash_distance": 30,
+      "reason": "different_cover_keep"
+    },
+    {
+      "folder": "Sherlock Holmes The Awakened - Deluxe Edition",
+      "regular": "Sherlock Holmes The Awakened",
+      "dhash_distance": 24,
+      "reason": "different_cover_keep"
+    },
+    {
+      "folder": "Sherlock Holmes The Awakened - Premium Edition",
+      "regular": "Sherlock Holmes The Awakened",
+      "dhash_distance": 26,
+      "reason": "different_cover_keep"
+    },
+    {
+      "folder": "South of Midnight Premium Edition",
+      "regular": "South of Midnight",
+      "dhash_distance": 23,
+      "reason": "different_cover_keep"
+    }
+  ]
+}
